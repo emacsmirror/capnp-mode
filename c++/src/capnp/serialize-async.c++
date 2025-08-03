@@ -638,7 +638,8 @@ kj::Promise<kj::Maybe<MessageReaderAndFds>> BufferedMessageStream::tryReadMessag
 
   size_t expected = expectedSizeInWordsFromPrefix(data);
 
-  if (!leftoverFds.empty() && expected * sizeof(word) == dataByteSize) {
+  if (!leftoverFds.empty() &&
+      (expected * sizeof(word) == dataByteSize || expected > buffer.size() / 2)) {
     // We're about to return a message that consumes the rest of the data in the buffer, and
     // `leftoverFds` is non-empty. Those FDs are considered attached to whatever message contains
     // the last byte in the buffer. That's us! Let's consume them.
