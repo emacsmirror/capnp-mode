@@ -3865,7 +3865,26 @@ private:
       uint64_t interfaceId, uint64_t methodId,
       kj::Own<ClientHook>&& capability, kj::Own<CallContextHook>&& context,
       ClientHook::CallHints hints) {
-    return capability->call(interfaceId, methodId, kj::mv(context), hints);
+    try {
+      return capability->call(interfaceId, methodId, kj::mv(context), hints);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      auto pipeline = newBrokenPipeline(kj::cp(exception));
+
+      // In the past, an exception here would have killed the entire connection (and also caused
+      // us to send back a bogus Finish message claiming the call was canceled). We have evidence
+      // that such exceptions are being thrown, but we're not sure what they are. Hopefully they
+      // will now show up in a more reasonable place, but just to understand what was going on,
+      // let's log.
+      //
+      // TODO(cleanup): Remove this log once investigation is complete.
+      KJ_LOG(WARNING, "NOSENTRY RPC startCall() threw", exception);
+
+      return {
+        .promise = kj::mv(exception),
+        .pipeline = kj::mv(pipeline),
+      };
+    }
   }
 
   kj::Own<ClientHook> getMessageTarget(const rpc::MessageTarget::Reader& target) {
