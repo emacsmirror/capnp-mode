@@ -36,6 +36,7 @@
 #include <kj/time.h>
 #include <sys/types.h>
 #include <kj/filesystem.h>
+
 #if _WIN32
 #include <ws2tcpip.h>
 #include "windows-sanity.h"
@@ -3572,6 +3573,45 @@ KJ_TEST("pump file to socket") {
   // Try with a disk file. Should use sendfile().
   auto fs = kj::newDiskFilesystem();
   doTest(fs->getCurrent().createTemporary());
+}
+
+KJ_TEST("Calling abortRead() while tryRead() is in progress") {
+  // This is a stream that will only permit one call to tryRead() to be in progress at any one time
+  // Any tryRead calls won't ever complete
+  class NonConcurrentStream final: public kj::AsyncInputStream {
+  public:
+    virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      numConcurrentCalls++;
+      KJ_DEFER(numConcurrentCalls--);
+      co_await (kj::Promise<void>) kj::NEVER_DONE;
+      co_return 0;
+    }
+
+    uint numConcurrentCalls = 0;
+  };
+ 
+  EventLoop eventLoop;
+  WaitScope ws(eventLoop);
+
+  {
+    auto nonConcurrentStream = kj::heap<NonConcurrentStream>();
+    
+    auto pipe = kj::newOneWayPipe();
+    auto pumpTask = nonConcurrentStream->pumpTo(*pipe.out).ignoreResult();
+    auto readTask = pipe.in->readAllBytes().ignoreResult();
+
+    // Assert that pumpTask and readTask are stuck
+    KJ_EXPECT(!pumpTask.poll(ws));
+    KJ_EXPECT(!readTask.poll(ws));
+
+    // Close the read end of the pipe (will cause an abortRead())
+    pipe.in = nullptr;
+
+    // abortRead() shouldn't invoke tryRead() again because our stream can't handle it
+    // See HttpFixedLengthEntityInputReader and HttpChunkedEntityInputReader for real examples of
+    // such streams.
+    KJ_EXPECT(nonConcurrentStream->numConcurrentCalls == 0);
+  }
 }
 
 }  // namespace

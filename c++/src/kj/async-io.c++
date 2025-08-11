@@ -841,26 +841,32 @@ private:
     }
 
     void abortRead() override {
-      canceler.cancel("abortRead() was called");
+      if (canceler.isEmpty()) {
+        // No read in flight, we must check for EOF.
 
-      // The input might have reached EOF, but we haven't detected it yet because we haven't tried
-      // to read that far. If we had not optimized tryPumpFrom() and instead used the default
-      // pumpTo() implementation, then the input would not have called write() again once it
-      // reached EOF, and therefore the abortRead() on the other end would *not* propagate an
-      // exception! We need the same behavior here. To that end, we need to detect if we're at EOF
-      // by reading one last byte.
-      checkEofTask = kj::evalNow([&]() {
-        static char junk;
-        return input.tryRead(&junk, 1, 1).then([this](uint64_t n) {
-          if (n == 0) {
-            fulfiller.fulfill(kj::cp(pumpedSoFar));
-          } else {
-            fulfiller.reject(KJ_EXCEPTION(DISCONNECTED, "read end of pipe was aborted"));
-          }
-        }).eagerlyEvaluate([this](kj::Exception&& e) {
-          fulfiller.reject(kj::mv(e));
+        // The input might have reached EOF, but we haven't detected it yet because we haven't tried
+        // to read that far. If we had not optimized tryPumpFrom() and instead used the default
+        // pumpTo() implementation, then the input would not have called write() again once it
+        // reached EOF, and therefore the abortRead() on the other end would *not* propagate an
+        // exception! We need the same behavior here. To that end, we need to detect if we're at EOF
+        // by reading one last byte.
+        checkEofTask = kj::evalNow([&]() {
+          static char junk;
+          return input.tryRead(&junk, 1, 1).then([this](uint64_t n) {
+            if (n == 0) {
+              fulfiller.fulfill(kj::cp(pumpedSoFar));
+            } else {
+              fulfiller.reject(KJ_EXCEPTION(DISCONNECTED, "read end of pipe was aborted"));
+            }
+          }).eagerlyEvaluate([this](kj::Exception&& e) {
+            fulfiller.reject(kj::mv(e));
+          });
         });
-      });
+      } else {
+        // Read is in-flight; by definition we are not at EOF.
+        canceler.cancel("abortRead() was called");
+        fulfiller.reject(KJ_EXCEPTION(DISCONNECTED, "read end of pipe was aborted"));
+      }
 
       pipe.endState(*this);
       pipe.abortRead();
