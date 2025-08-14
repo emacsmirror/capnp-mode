@@ -503,7 +503,7 @@ public:
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override {
     kj::HttpHeaders respHeaders(headerTable);
-    respHeaders.add("X-Foo", "bar");
+    respHeaders.addPtrPtr("X-Foo", "bar");
     fulfiller->fulfill(response.acceptWebSocket(respHeaders));
     return kj::mv(done);
   }

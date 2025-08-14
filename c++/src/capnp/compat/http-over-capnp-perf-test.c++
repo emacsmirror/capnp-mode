@@ -258,8 +258,8 @@ public:
     KJ_ASSERT(headers.get(customHeaderId) == "corge"_kj);
 
     kj::HttpHeaders responseHeaders(headerTable);
-    responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "text/plain");
-    responseHeaders.set(customHeaderId, "foobar"_kj);
+    responseHeaders.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "text/plain");
+    responseHeaders.setPtr(customHeaderId, "foobar"_kj);
     auto stream = response.send(200, "OK", responseHeaders);
     auto promise = stream->write(HELLO_WORLD.asBytes());
     return promise.attach(kj::mv(stream));
@@ -278,7 +278,7 @@ public:
 
   kj::Promise<void> sendRequest(kj::HttpClient& client) {
     kj::HttpHeaders headers(headerTable);
-    headers.set(customHeaderId, "corge"_kj);
+    headers.setPtr(customHeaderId, "corge"_kj);
     auto req = client.request(kj::HttpMethod::GET, "http://foo"_kj, headers);
     req.body = nullptr;
     auto resp = co_await req.response;
@@ -292,7 +292,7 @@ public:
 
   kj::Promise<void> sendRequest(kj::HttpService& service) {
     kj::HttpHeaders headers(headerTable);
-    headers.set(customHeaderId, "corge"_kj);
+    headers.setPtr(customHeaderId, "corge"_kj);
     NullInputStream requestBody;
     co_await service.request(kj::HttpMethod::GET, "http://foo"_kj, headers, requestBody, *this);
     KJ_ASSERT(responseBody.consume() == HELLO_WORLD);

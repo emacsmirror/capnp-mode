@@ -1074,18 +1074,18 @@ kj::HttpHeaders HttpOverCapnpFactory::capnpToKj(
             auto cvInt = static_cast<uint>(nv.getCommonValue());
             KJ_REQUIRE(nameInt < valueCapnpToKj.size(),
                 "unknown common header value", nv.getCommonValue());
-            result.set(nameCapnpToKj[nameInt], valueCapnpToKj[cvInt]);
+            result.setPtr(nameCapnpToKj[nameInt], valueCapnpToKj[cvInt]);
             break;
           }
           case capnp::HttpHeader::Common::VALUE: {
             auto headerId = nameCapnpToKj[nameInt];
             if (result.get(headerId) == kj::none) {
-              result.set(headerId, nv.getValue());
+              result.setPtr(headerId, nv.getValue());
             } else {
               // Unusual: This is a duplicate header, so fall back to add(), which may trigger
               //   comma-concatenation, except in certain cases where comma-concatentaion would
               //   be problematic.
-              result.add(headerId.toString(), nv.getValue());
+              result.addPtrPtr(headerId.toString(), nv.getValue());
             }
             break;
           }
@@ -1094,7 +1094,7 @@ kj::HttpHeaders HttpOverCapnpFactory::capnpToKj(
       }
       case capnp::HttpHeader::UNCOMMON: {
         auto nv = header.getUncommon();
-        result.add(nv.getName(), nv.getValue());
+        result.addPtrPtr(nv.getName(), nv.getValue());
       }
     }
   }
