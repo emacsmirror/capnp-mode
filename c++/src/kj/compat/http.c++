@@ -432,7 +432,7 @@ static kj::Maybe<kj::OneOf<HttpMethod, HttpConnectMethod>> consumeHttpMethod(cha
         case 'S': EXPECT_REST(UNS,UBSCRIBE)
         default: return kj::none;
       }
-    
+
     default: return kj::none;
   }
 #undef EXPECT_REST
@@ -500,8 +500,8 @@ static void requireValidHeaderName(kj::StringPtr name) {
   }
 }
 
-static void requireValidHeaderValue(kj::StringPtr value) {
-  KJ_REQUIRE(HttpHeaders::isValidHeaderValue(value), "invalid header value",
+static void requireValidHeaderValue(kj::StringPtr value, auto name) {
+  KJ_REQUIRE(HttpHeaders::isValidHeaderValue(value), name, "invalid header value",
       kj::encodeCEscape(value));
 }
 
@@ -698,7 +698,7 @@ bool HttpHeaders::isWebSocket() const {
 
 void HttpHeaders::set(HttpHeaderId id, kj::StringPtr value) {
   id.requireFrom(*table);
-  requireValidHeaderValue(value);
+  requireValidHeaderValue(value, id);
 
   indexedHeaders[id.id] = value;
 }
@@ -710,7 +710,7 @@ void HttpHeaders::set(HttpHeaderId id, kj::String&& value) {
 
 void HttpHeaders::add(kj::StringPtr name, kj::StringPtr value) {
   requireValidHeaderName(name);
-  requireValidHeaderValue(value);
+  requireValidHeaderValue(value, name);
 
   addNoCheck(name, value);
 }
@@ -2888,7 +2888,7 @@ public:
               // We must reset context on each message.
               decompressor.reset();
             }
-            
+
             auto decompressedOrError = decompressor.processMessage(message, originalMaxSize);
             KJ_SWITCH_ONEOF(decompressedOrError) {
               KJ_CASE_ONEOF(protocolError, ProtocolError) {
@@ -3542,7 +3542,7 @@ private:
           // We must reset context on each message.
           compressor.reset();
         }
-        
+
         KJ_SWITCH_ONEOF(compressor.processMessage(message)) {
           KJ_CASE_ONEOF(error, ProtocolError) {
             KJ_FAIL_REQUIRE("Error compressing websocket message: ", error.description);
