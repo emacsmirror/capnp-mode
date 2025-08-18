@@ -478,7 +478,7 @@ Promise<void> httpClient(Own<AsyncIoStream> connection) {
   auto client = newHttpClient(table, *connection);
 
   HttpHeaders headers(table);
-  headers.set(HttpHeaderId::HOST, "capnproto.org");
+  headers.setPtr(HttpHeaderId::HOST, "capnproto.org");
 
   auto response = co_await client->request(HttpMethod::GET, "/", headers).response;
   KJ_EXPECT(response.statusCode / 100 == 3);

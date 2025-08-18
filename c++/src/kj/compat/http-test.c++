@@ -358,23 +358,23 @@ KJ_TEST("HttpHeaders validation") {
   auto table = HttpHeaderTable::Builder().build();
   HttpHeaders headers(*table);
 
-  headers.add("Valid-Name", "valid value");
+  headers.addPtrPtr("Valid-Name", "valid value");
 
   // The HTTP RFC prohibits control characters, but browsers only prohibit \0, \r, and \n. KJ goes
   // with the browsers for compatibility.
-  headers.add("Valid-Name", "valid\x01value");
+  headers.addPtrPtr("Valid-Name", "valid\x01value");
 
   // The HTTP RFC does not permit non-ASCII values.
   // KJ chooses to interpret them as UTF-8, to avoid the need for any expensive conversion.
   // Browsers apparently interpret them as LATIN-1. Applications can reinterpet these strings as
   // LATIN-1 easily enough if they really need to.
-  headers.add("Valid-Name", u8"valid€value");
+  headers.addPtrPtr("Valid-Name", u8"valid€value");
 
-  KJ_EXPECT_THROW_MESSAGE("invalid header name", headers.add("Invalid Name", "value"));
-  KJ_EXPECT_THROW_MESSAGE("invalid header name", headers.add("Invalid@Name", "value"));
+  KJ_EXPECT_THROW_MESSAGE("invalid header name", headers.addPtrPtr("Invalid Name", "value"));
+  KJ_EXPECT_THROW_MESSAGE("invalid header name", headers.addPtrPtr("Invalid@Name", "value"));
 
-  KJ_EXPECT_THROW_MESSAGE("invalid header value", headers.set(HttpHeaderId::HOST, "in\nvalid"));
-  KJ_EXPECT_THROW_MESSAGE("invalid header value", headers.add("Valid-Name", "in\nvalid"));
+  KJ_EXPECT_THROW_MESSAGE("invalid header value", headers.setPtr(HttpHeaderId::HOST, "in\nvalid"));
+  KJ_EXPECT_THROW_MESSAGE("invalid header value", headers.addPtrPtr("Valid-Name", "in\nvalid"));
 }
 
 KJ_TEST("HttpHeaders Set-Cookie handling") {
@@ -384,12 +384,12 @@ KJ_TEST("HttpHeaders Set-Cookie handling") {
   auto table = builder.build();
 
   HttpHeaders headers(*table);
-  headers.set(hCookie, "Foo");
-  headers.add("Cookie", "Bar");
-  headers.add("Cookie", "Baz");
-  headers.set(hSetCookie, "Foo");
-  headers.add("Set-Cookie", "Bar");
-  headers.add("Set-Cookie", "Baz");
+  headers.setPtr(hCookie, "Foo");
+  headers.addPtrPtr("Cookie", "Bar");
+  headers.addPtrPtr("Cookie", "Baz");
+  headers.setPtr(hSetCookie, "Foo");
+  headers.addPtrPtr("Set-Cookie", "Bar");
+  headers.addPtrPtr("Set-Cookie", "Baz");
 
   auto text = headers.toString();
   KJ_EXPECT(text ==
@@ -572,7 +572,7 @@ void testHttpClientRequest(kj::WaitScope& waitScope, const HttpRequestTestCase& 
 
   HttpHeaders headers(table);
   for (auto& header: testCase.requestHeaders) {
-    headers.set(header.id, header.value);
+    headers.setPtr(header.id, header.value);
   }
 
   auto request = client->request(testCase.method, testCase.path, headers, testCase.requestBodySize);
@@ -643,7 +643,7 @@ void testHttpClient(kj::WaitScope& waitScope, HttpHeaderTable& table,
 
   HttpHeaders headers(table);
   for (auto& header: testCase.request.requestHeaders) {
-    headers.set(header.id, header.value);
+    headers.setPtr(header.id, header.value);
   }
 
   auto request = client.request(
@@ -715,7 +715,7 @@ public:
 
       responseHeaders.clear();
       for (auto& header: response.responseHeaders) {
-        responseHeaders.set(header.id, header.value);
+        responseHeaders.setPtr(header.id, header.value);
       }
 
       auto stream = responseSender.send(response.statusCode, response.statusText,
@@ -1514,7 +1514,7 @@ KJ_TEST("HttpClient parallel pipeline") {
 
     HttpHeaders headers(table);
     for (auto& header: testCase.request.requestHeaders) {
-      headers.set(header.id, header.value);
+      headers.setPtr(header.id, header.value);
     }
 
     auto request = client->request(
@@ -2747,7 +2747,7 @@ kj::ArrayPtr<const byte> asBytes(const char (&chars)[s]) {
 void testWebSocketClient(kj::WaitScope& waitScope, HttpHeaderTable& headerTable,
                          kj::HttpHeaderId hMyHeader, HttpClient& client) {
   kj::HttpHeaders headers(headerTable);
-  headers.set(hMyHeader, "foo");
+  headers.setPtr(hMyHeader, "foo");
   auto response = client.openWebSocket("/websocket", headers).wait(waitScope);
 
   KJ_EXPECT(response.statusCode == 101);
@@ -2787,7 +2787,7 @@ void testWebSocketTwoMessageCompression(kj::WaitScope& waitScope, HttpHeaderTabl
   // compressed message changes.
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(extHeader, extensions);
+  headers.setPtr(extHeader, extensions);
   auto response = client.openWebSocket("/websocket", headers).wait(waitScope);
 
   KJ_EXPECT(response.statusCode == 101);
@@ -2829,7 +2829,7 @@ void testWebSocketThreeMessageCompression(kj::WaitScope& waitScope, HttpHeaderTa
   // The third message is the same as the first (from the application code's perspective).
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(extHeader, extensions);
+  headers.setPtr(extHeader, extensions);
   auto response = client.openWebSocket("/websocket", headers).wait(waitScope);
 
   KJ_EXPECT(response.statusCode == 101);
@@ -2879,7 +2879,7 @@ void testWebSocketEmptyMessageCompression(kj::WaitScope& waitScope, HttpHeaderTa
   // Confirm that we can send empty messages when compression is enabled.
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(extHeader, extensions);
+  headers.setPtr(extHeader, extensions);
   auto response = client.openWebSocket("/websocket", headers).wait(waitScope);
 
   KJ_EXPECT(response.statusCode == 101);
@@ -2934,7 +2934,7 @@ void testWebSocketOptimizePumpProxy(kj::WaitScope& waitScope, HttpHeaderTable& h
   // configuration and pass it to `proxyServer` in a way that would allow for optimizedPumping.
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(extHeader, extensions);
+  headers.setPtr(extHeader, extensions);
   auto response = client.openWebSocket("/websocket", headers).wait(waitScope);
 
   KJ_EXPECT(response.statusCode == 101);
@@ -2972,7 +2972,7 @@ void testWebSocketFourMessageCompression(kj::WaitScope& waitScope, HttpHeaderTab
   // the message). We will receive three messages.
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(extHeader, extensions);
+  headers.setPtr(extHeader, extensions);
   auto response = client.openWebSocket("/websocket", headers).wait(waitScope);
 
   KJ_EXPECT(response.statusCode == 101);
@@ -3854,7 +3854,7 @@ KJ_TEST("HttpClient WebSocket error") {
   auto client = newHttpClient(*headerTable, *pipe.ends[0], clientSettings);
 
   kj::HttpHeaders headers(*headerTable);
-  headers.set(hMyHeader, "foo");
+  headers.setPtr(hMyHeader, "foo");
 
   {
     auto response = client->openWebSocket("/websocket", headers).wait(waitScope);
@@ -6257,7 +6257,7 @@ KJ_TEST("HttpClient to capnproto.org") {
     auto client = newHttpClient(table, *conn);
 
     HttpHeaders headers(table);
-    headers.set(HttpHeaderId::HOST, "capnproto.org");
+    headers.setPtr(HttpHeaderId::HOST, "capnproto.org");
 
     auto response = client->request(HttpMethod::GET, "/", headers).response.wait(io.waitScope);
     KJ_EXPECT(response.statusCode / 100 == 3);
