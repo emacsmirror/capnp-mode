@@ -627,6 +627,63 @@ private:
 };
 
 // =======================================================================================
+// Small-buffer-optimized SmallArray
+//
+// SmallArray is useful when you need a temporary buffer, whose size you cannot know until runtime
+// but is likely to be small, and whose lifetime can be bounded by either the stack or some
+// immovable parent object.
+//
+// SmallArray is not an Array. In particular, it has the following differences:
+//
+// 1. SmallArray has an inline buffer of `smallSize` elements, where `smallSize` is a size_t
+//    template parameter. If one is constructed with a size less than or equal to `smallSize`, the
+//    inline space is used, and no heap allocation is performed. Otherwise, a regular heap Array is
+//    allocated.
+//
+// 2. SmallArray is immovable. You must construct one in place wherever you want to use one. They
+//    cannot be "released", "finished", or assigned-to.
+//
+// 3. SmallArray has no specific constructor functions like `heapArray<T>()`. Instead, use its
+//    constructor directly, passing a single `size` parameter.
+//
+// SmallArray requires its element type T to have a default constuctor. This is because SmallArray
+// always constructs and destructs the objects in its inline space, even if it ends up falling back
+// to a heap Array. This is done for implementation simplicity, and notably matches the behavior of
+// the `KJ_STACK_ARRAY` macro, which has the same use case as SmallArray.
+//
+// TODO(someday): Implement SmallArrayBuilder to support types which have no default constructor.
+
+template <typename T, size_t smallSize>
+class SmallArray final: private Array<T> {
+public:
+  explicit SmallArray(size_t size);
+
+  // We support the full Array<T> API except `releaseAsBytes()`, `releaseAsChars()`, `attach()`,
+  // `operator=()`, and move-construction.
+
+  KJ_DISALLOW_COPY_AND_MOVE(SmallArray);
+
+  using Array<T>::operator ArrayPtr<T>;
+  using Array<T>::operator ArrayPtr<const T>;
+  using Array<T>::asPtr;
+  using Array<T>::size;
+  using Array<T>::operator[];
+  using Array<T>::begin;
+  using Array<T>::end;
+  using Array<T>::front;
+  using Array<T>::back;
+  using Array<T>::operator==;
+  using Array<T>::slice;
+  using Array<T>::first;
+  using Array<T>::asBytes;
+  using Array<T>::asChars;
+  using Array<T>::as;
+
+private:
+  T space[smallSize];
+};
+
+// =======================================================================================
 // KJ_MAP
 
 #define KJ_MAP(elementName, array) \
@@ -693,6 +750,12 @@ void ArrayDisposer::dispose(T* firstElement, size_t elementCount, size_t capacit
                          sizeof(T), elementCount, capacity, &Dispose_<T>::destruct);
   }
 }
+
+template <typename T, size_t smallSize>
+SmallArray<T, smallSize>::SmallArray(size_t size)
+    : Array<T>(size <= smallSize
+        ? Array<T>(space, size, NullArrayDisposer::instance)
+        : heapArray<T>(size)) {}
 
 namespace _ {  // private
 
