@@ -358,8 +358,7 @@ public:
   KJ_DEPRECATED("Use addPtr()")
   void add(kj::StringPtr name, kj::String&& value);
   void addPtr(kj::StringPtr name, kj::String&& value);
-  void addPtr(kj::StringPtr name, kj::StringPtr value) = delete;
-  void addPtr(kj::String&& name, kj::StringPtr value) = delete;
+  void addPtr(kj::String&& name, kj::Sting&& value) = delete;
 
   void add(kj::String&& name, kj::String&& value);
   // Append a header. `name` will be looked up in the header table, but if it's not mapped, the
