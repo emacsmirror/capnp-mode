@@ -382,6 +382,8 @@ KJ_NORETURN(void unreachable());
 // variable-sized arrays.  For other compilers we could just use a fixed-size array.  `minStack`
 // is the stack array size to use if variable-width arrays are not supported.  `maxStack` is the
 // maximum stack array size if variable-width arrays *are* supported.
+//
+// TODO(cleanup): Deprecate this in favor of kj::SmallArray, over in array.h
 #if __GNUC__ && !__clang__
 #define KJ_STACK_ARRAY(type, name, size, minStack, maxStack) \
   size_t name##_size = (size); \
@@ -2295,7 +2297,7 @@ class ThreadId {
   // Implemented as thread_local address, so could be efficient even for production
   // environments especially with LTO.
 
-public:  
+public:
   static ThreadId current();
   // Obtain current thread id
 
@@ -2306,7 +2308,7 @@ public:
 
 private:
   inline ThreadId(void* id) : id(id) {}
-  void* id;  
+  void* id;
 };
 
 }  // namespace kj
