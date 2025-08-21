@@ -3589,13 +3589,13 @@ KJ_TEST("Calling abortRead() while tryRead() is in progress") {
 
     uint numConcurrentCalls = 0;
   };
- 
+
   EventLoop eventLoop;
   WaitScope ws(eventLoop);
 
   {
     auto nonConcurrentStream = kj::heap<NonConcurrentStream>();
-    
+
     auto pipe = kj::newOneWayPipe();
     auto pumpTask = nonConcurrentStream->pumpTo(*pipe.out).ignoreResult();
     auto readTask = pipe.in->readAllBytes().ignoreResult();
@@ -3613,6 +3613,45 @@ KJ_TEST("Calling abortRead() while tryRead() is in progress") {
     KJ_EXPECT(nonConcurrentStream->numConcurrentCalls == 0);
   }
 }
+
+KJ_TEST("Calling abortRead() after tryRead() raised exception") {
+  // This is a stream that will raise an exception on any read attempt.
+  // It will also flag if it is called again after raising the exception.
+  class ExceptionStream final: public kj::AsyncInputStream {
+  public:
+    virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      numCalls++;
+      KJ_FAIL_REQUIRE("This stream never works");
+      co_return 0;
+    }
+
+    uint numCalls = 0;
+  };
+
+  EventLoop eventLoop;
+  WaitScope ws(eventLoop);
+
+  {
+    auto exceptionStream = kj::heap<ExceptionStream>();
+
+    auto pipe = kj::newOneWayPipe();
+    auto pumpTask = exceptionStream->pumpTo(*pipe.out).ignoreResult();
+    auto readTask = pipe.in->readAllBytes().ignoreResult();
+
+    // Assert that pumpTask and readTask made progress
+    KJ_EXPECT(pumpTask.poll(ws));
+    KJ_EXPECT(readTask.poll(ws));
+
+    // Close the read end of the pipe (will cause an abortRead())
+    pipe.in = nullptr;
+
+    // abortRead() shouldn't invoke tryRead() again because our stream can't handle it
+    // See HttpFixedLengthEntityInputReader and HttpChunkedEntityInputReader for real examples of
+    // such streams.
+    KJ_EXPECT(exceptionStream->numCalls == 1);
+  }
+}
+
 
 // ---------------------------------------------------------------------------------------------
 // accept() with aborted connection - IPv4 listener

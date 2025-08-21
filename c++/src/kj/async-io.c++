@@ -776,8 +776,12 @@ private:
       auto pumpLeft = amount - pumpedSoFar;
       auto min = kj::min(pumpLeft, minBytes);
       auto max = kj::min(pumpLeft, maxBytes);
+
+      isReadOutstanding = true;
+
       return canceler.wrap(input.tryRead(readBuffer, min, max)
           .then([this,readBuffer,minBytes,maxBytes,min](size_t actual) -> kj::Promise<size_t> {
+        isReadOutstanding = false;
         canceler.release();
         pumpedSoFar += actual;
         KJ_ASSERT(pumpedSoFar <= amount);
@@ -821,8 +825,12 @@ private:
       KJ_REQUIRE(canceler.isEmpty(), "already pumping");
 
       auto n = kj::min(amount2, amount - pumpedSoFar);
+
+      isReadOutstanding = true;
+
       return canceler.wrap(input.pumpTo(output, n)
           .then([this,&output,amount2,n](uint64_t actual) -> Promise<uint64_t> {
+        isReadOutstanding = false;
         canceler.release();
         pumpedSoFar += actual;
         KJ_ASSERT(pumpedSoFar <= amount);
@@ -841,7 +849,7 @@ private:
     }
 
     void abortRead() override {
-      if (canceler.isEmpty()) {
+      if (!isReadOutstanding) {
         // No read in flight, we must check for EOF.
 
         // The input might have reached EOF, but we haven't detected it yet because we haven't tried
@@ -907,6 +915,10 @@ private:
     uint64_t pumpedSoFar = 0;
     Canceler canceler;
     kj::Promise<void> checkEofTask = nullptr;
+
+    // If true, a tryRead() call is either still in progress or didn't complete sucessfully.
+    // In this case, we cannot invoke tryRead() again during an abortRead() call.
+    bool isReadOutstanding = false;
   };
 
   class BlockedRead final: public AsyncCapabilityStream {
