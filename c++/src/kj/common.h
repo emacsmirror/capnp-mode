@@ -1070,7 +1070,8 @@ inline void dtor(T& location) {
 //    }
 //
 // KJ_IF_SOME's first parameter is a variable name which will be defined within the following
-// block.  The variable will be a reference to the Maybe's value.
+// block.  The variable will be a reference to the Maybe's value.  If the KJ_IF_SOME appears
+// on the 64th line of the source file, then the name cannot be `w`, because Microsoft.
 //
 // Note that Maybe<T&> actually just wraps a pointer, whereas Maybe<T> wraps a T and a boolean
 // indicating nullness.
