@@ -84,6 +84,21 @@ target_compile_features(kj PUBLIC cxx_std_20)
 if(UNIX AND NOT ANDROID)
   target_link_libraries(kj PUBLIC pthread)
 endif()
+
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#include <atomic>
+int main() {
+  std::atomic<uint8_t> w1;
+  std::atomic<uint16_t> w2;
+  std::atomic<uint32_t> w4;
+  std::atomic<uint64_t> w8;
+  return ++w1 + ++w2 + ++w4 + ++w8;
+}" CAPNP_BUILDS_WITHOUT_LIBATOMIC)
+
+if(NOT CAPNP_BUILDS_WITHOUT_LIBATOMIC)
+  target_link_libraries(kj PUBLIC atomic)
+endif()
+
 #make sure the lite flag propagates to all users (internal + external) of this library
 target_compile_definitions(kj PUBLIC ${CAPNP_LITE_FLAG})
 #make sure external consumers don't need to manually set the include dirs
