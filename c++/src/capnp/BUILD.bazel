@@ -84,6 +84,10 @@ cc_library(
     hdrs = [
         "persistent.capnp.h",
         "reconnect.h",
+        "message.h",
+        "common.h",
+        "layout.h",
+        "any.h",
         "rpc.capnp.h",
         "rpc.h",
         "rpc-prelude.h",
