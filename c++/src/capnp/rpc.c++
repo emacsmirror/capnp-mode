@@ -396,6 +396,82 @@ private:
 
 // =======================================================================================
 
+// All known places that hold OwnConnectionState.
+enum class RpcSystemBase::ConnectionStateOwner {
+  CONNECTION_MAP,
+  CLIENT,
+  QUESTION,
+  REQUEST,
+  PIPELINE,
+  RESPONSE,
+  CALL_CONTEXT,
+  DELETE_ME_LIST,
+
+  ENUM_COUNT
+};
+
+// TEMPORARY: Wrapper around Own<RpcConnectionState>, which keeps track of exactly who is holding
+//   the reference. This is to debug a problem: We have observed in production that
+//   RpcConnectionStates commonly still have references even after being marked "idle". This
+//   suggests the connection is not, in fact, idle, and the idle detection is not working
+//   correctly. But, I can't figure out where the references are coming from. So, this
+//   instrumentation maintains refcounts by type in order to add to the error log to narrow down
+//   the problem.
+template <RpcSystemBase::ConnectionStateOwner owner>
+class RpcSystemBase::OwnConnectionState {
+ public:
+  static_assert(owner < ConnectionStateOwner::ENUM_COUNT);
+
+  inline OwnConnectionState(kj::Own<RpcConnectionState>&& other): inner(kj::mv(other)) {
+    addref();
+  }
+  OwnConnectionState(OwnConnectionState&& other) = default;
+  template <RpcSystemBase::ConnectionStateOwner otherOwner>
+  OwnConnectionState(OwnConnectionState<otherOwner>&& other) {
+    other.deref();
+    inner = kj::mv(other.inner);
+    addref();
+  }
+  inline ~OwnConnectionState() noexcept(false) {
+    deref();
+  }
+
+  inline OwnConnectionState& operator=(kj::Own<RpcConnectionState>&& other) {
+    deref();
+    inner = kj::mv(other);
+    addref();
+    return *this;
+  }
+  inline OwnConnectionState& operator=(OwnConnectionState&& other) {
+    deref();
+    inner = kj::mv(other.inner);
+    // no addref() because we're taking ownership of the existing ref
+    return *this;
+  }
+  template <RpcSystemBase::ConnectionStateOwner otherOwner>
+  inline OwnConnectionState& operator=(OwnConnectionState<otherOwner>&& other) {
+    other.deref();
+    inner = kj::mv(other.inner);
+    addref();
+    return *this;
+  }
+
+  inline RpcConnectionState* get() { return inner.get(); }
+  inline RpcConnectionState* operator->() { return inner.operator->(); }
+  inline RpcConnectionState& operator*() { return *inner; }
+
+ private:
+  kj::Own<RpcConnectionState> inner;
+
+  template <RpcSystemBase::ConnectionStateOwner>
+  friend class OwnConnectionState;
+
+  // These methods need to be defined after `RpcConnectionState` since they modify its
+  // `refcountsByType` member.
+  inline void addref();
+  inline void deref();
+};
+
 class RpcSystemBase::RpcConnectionState final
     : public kj::TaskSet::ErrorHandler, public kj::Refcounted {
 public:
@@ -622,6 +698,11 @@ private:
   class RpcPipeline;
   class RpcCallContext;
   class RpcResponse;
+
+  template <RpcSystemBase::ConnectionStateOwner>
+  friend class OwnConnectionState;
+
+  uint refcountsByType[static_cast<uint>(ConnectionStateOwner::ENUM_COUNT)] = {};
 
   // =======================================================================================
   // The Four Tables entry types
@@ -1114,7 +1195,7 @@ private:
       return kj::addRef(*this);
     }
 
-    kj::Own<RpcConnectionState> connectionState;
+    OwnConnectionState<ConnectionStateOwner::CLIENT> connectionState;
 
     kj::Maybe<kj::Own<RpcFlowController>> flowController;
     // Becomes non-null the first time a streaming call is made on this capability.
@@ -2384,7 +2465,7 @@ private:
     }
 
   private:
-    kj::Maybe<kj::Own<RpcConnectionState>> connectionState;
+    kj::Maybe<OwnConnectionState<ConnectionStateOwner::QUESTION>> connectionState;
     QuestionId id;
     kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Promise<kj::Own<RpcResponse>>>>> fulfiller;
   };
@@ -2557,7 +2638,7 @@ private:
     }
 
   private:
-    kj::Own<RpcConnectionState> connectionState;
+    OwnConnectionState<ConnectionStateOwner::REQUEST> connectionState;
 
     kj::Own<RpcClient> target;
     kj::Own<OutgoingRpcMessage> message;
@@ -2783,7 +2864,7 @@ private:
     }
 
   private:
-    kj::Own<RpcConnectionState> connectionState;
+    OwnConnectionState<ConnectionStateOwner::PIPELINE> connectionState;
     kj::Maybe<kj::ForkedPromise<kj::Own<RpcResponse>>> redirectLater;
 
     typedef kj::Own<QuestionRef> Waiting;
@@ -2840,7 +2921,7 @@ private:
     }
 
   private:
-    kj::Own<RpcConnectionState> connectionState;
+    OwnConnectionState<ConnectionStateOwner::RESPONSE> connectionState;
     kj::Own<IncomingRpcMessage> message;
     ReaderCapabilityTable capTable;
     AnyPointer::Reader reader;
@@ -3379,7 +3460,7 @@ private:
     }
 
   private:
-    kj::Own<RpcConnectionState> connectionState;
+    OwnConnectionState<ConnectionStateOwner::CALL_CONTEXT> connectionState;
     AnswerId answerId;
 
     ClientHook::CallHints hints;
@@ -3516,11 +3597,12 @@ private:
             //   production, but I couldn't tell what was holding the reference. Hopefully,
             //   propagating an explicit exception here will give us a stack trace that tells us
             //   what's holding onto the connection.
+            kj::ArrayPtr<uint> refcounts = refcountsByType;
             tasks.add(KJ_EXCEPTION(FAILED,
                 "RpcSystem bug: Connection shut down due to being idle, but if you're seeing "
                 "this error then apparently something was still using the connection. Please "
                 "take note of the stack and fix checkIfBecameIdle() to account for this kind of "
-                "reference still existing."));
+                "reference still existing.", refcounts));
             co_return;
           }
 
@@ -4559,6 +4641,20 @@ private:
   }
 };
 
+template <RpcSystemBase::ConnectionStateOwner owner>
+void RpcSystemBase::OwnConnectionState<owner>::addref() {
+  if (get() != nullptr) {
+    ++get()->refcountsByType[static_cast<uint>(owner)];
+  }
+}
+
+template <RpcSystemBase::ConnectionStateOwner owner>
+void RpcSystemBase::OwnConnectionState<owner>::deref() {
+  if (get() != nullptr) {
+    --get()->refcountsByType[static_cast<uint>(owner)];
+  }
+}
+
 // =======================================================================================
 
 class RpcSystemBase::Impl final: private BootstrapFactoryBase, private kj::TaskSet::ErrorHandler {
@@ -4578,7 +4674,7 @@ public:
       // We need to pull all the connections out of the map first, before calling disconnect on
       // them, since they will each remove themselves from the map which invalidates iterators.
       if (connections.size() > 0) {
-        kj::Vector<kj::Own<RpcConnectionState>> deleteMe(connections.size());
+        kj::Vector<OwnConnectionState<ConnectionStateOwner::DELETE_ME_LIST>> deleteMe(connections.size());
         kj::Exception shutdownException = KJ_EXCEPTION(DISCONNECTED, "RpcSystem was destroyed.");
         for (auto& entry: connections) {
           deleteMe.add(kj::mv(entry.value));
@@ -4640,7 +4736,8 @@ private:
   kj::Own<RpcSystemBrand> brand = kj::refcounted<RpcSystemBrand>();
   kj::TaskSet tasks;
 
-  typedef kj::HashMap<VatNetworkBase::Connection*, kj::Own<RpcConnectionState>>
+  typedef kj::HashMap<VatNetworkBase::Connection*,
+                      OwnConnectionState<ConnectionStateOwner::CONNECTION_MAP>>
       ConnectionMap;
   ConnectionMap connections;
 

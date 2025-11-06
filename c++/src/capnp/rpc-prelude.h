@@ -114,6 +114,10 @@ private:
 
   class RpcConnectionState;
 
+  enum class ConnectionStateOwner;
+  template <ConnectionStateOwner>
+  class OwnConnectionState;
+
   static void dropConnection(Impl& impl,
       VatNetworkBase::Connection& connection, kj::Promise<void> shutdownTask);
   // Called when RpcConnectionState becomes disconnected and so should be removed from the map of
