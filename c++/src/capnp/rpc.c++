@@ -853,6 +853,19 @@ private:
     }
   }
 
+  bool allTablesEmpty() {
+    // Returns true if all of the tables (imports, questions, etc.) are empty.
+    //
+    // More specifically, if this returns true, then calling disconnect() would not disrupt
+    // anything, because there's nothing to disrupt. This is important to decide if the connection
+    // is idle.
+
+    return questions.empty() && answers.empty() && exports.empty() && imports.empty() &&
+        // Technically the embargoes table should always be empty if the others are, but it's not
+        // expensive to check it.
+        embargoes.empty();
+  }
+
   void checkIfBecameIdle() {
     // Checks if the connection has become idle, and if so, informs the VatNetwork by calling
     // setIdle(true). Generally, this must be called after erasing an entry from any of the
@@ -860,13 +873,7 @@ private:
 
     if (idle) return;  // already idle
 
-    bool allTablesEmpty =
-        questions.empty() && answers.empty() && exports.empty() && imports.empty() &&
-        // Technically the embargoes table should always be empty if the others are, but it's not
-        // expensive to check it.
-        embargoes.empty();
-
-    if (!allTablesEmpty) {
+    if (!allTablesEmpty()) {
       // Not idle, don't do anything.
       return;
     }
@@ -3507,22 +3514,18 @@ private:
             co_return;
           }
 
-          // At this point, the last reference to this connection state *should* be the one in
-          // the RpcSystem's map. The refcount should therefore be 1, and `isShared()`.
-          if (isShared()) {
-            // Oh, we still have references. We will need to set ourselves to the "disconnected"
-            // state.
-            // TODO(bug): Previously, I had a KJ_LOG(ERROR) here, and it did actually show up in
-            //   production, but I couldn't tell what was holding the reference. Hopefully,
-            //   propagating an explicit exception here will give us a stack trace that tells us
-            //   what's holding onto the connection.
-            tasks.add(KJ_EXCEPTION(FAILED,
-                "RpcSystem bug: Connection shut down due to being idle, but if you're seeing "
-                "this error then apparently something was still using the connection. Please "
-                "take note of the stack and fix checkIfBecameIdle() to account for this kind of "
-                "reference still existing."));
-            co_return;
-          }
+          // We shouldn't have become idle if the tables aren't empty. Double-check.
+          //
+          // Note that if any table is non-empty, then we need to call `disconnect()`, which
+          // iterates through all the tables and rejects the appropriate promises to propagate
+          // the error. But if the tables are empty, then we can skip disconnect() and just
+          // set the state to `Disconnected` below, which saves time and avoids spurious logging,
+          // hence why we're performing this check.
+          KJ_ASSERT(allTablesEmpty(),
+              // If the assert fails, let's log all the tables to try to figure out which is the
+              // culprit...
+              questions.empty(), answers.empty(), exports.empty(), imports.empty(),
+              embargoes.empty());
 
           // Make sure to mark ourselves as Disconnected so if the shutdown task fails it doesn't
           // cause us to call shutdown() again.
