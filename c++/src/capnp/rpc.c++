@@ -396,82 +396,6 @@ private:
 
 // =======================================================================================
 
-// All known places that hold OwnConnectionState.
-enum class RpcSystemBase::ConnectionStateOwner {
-  CONNECTION_MAP,
-  CLIENT,
-  QUESTION,
-  REQUEST,
-  PIPELINE,
-  RESPONSE,
-  CALL_CONTEXT,
-  DELETE_ME_LIST,
-
-  ENUM_COUNT
-};
-
-// TEMPORARY: Wrapper around Own<RpcConnectionState>, which keeps track of exactly who is holding
-//   the reference. This is to debug a problem: We have observed in production that
-//   RpcConnectionStates commonly still have references even after being marked "idle". This
-//   suggests the connection is not, in fact, idle, and the idle detection is not working
-//   correctly. But, I can't figure out where the references are coming from. So, this
-//   instrumentation maintains refcounts by type in order to add to the error log to narrow down
-//   the problem.
-template <RpcSystemBase::ConnectionStateOwner owner>
-class RpcSystemBase::OwnConnectionState {
- public:
-  static_assert(owner < ConnectionStateOwner::ENUM_COUNT);
-
-  inline OwnConnectionState(kj::Own<RpcConnectionState>&& other): inner(kj::mv(other)) {
-    addref();
-  }
-  OwnConnectionState(OwnConnectionState&& other) = default;
-  template <RpcSystemBase::ConnectionStateOwner otherOwner>
-  OwnConnectionState(OwnConnectionState<otherOwner>&& other) {
-    other.deref();
-    inner = kj::mv(other.inner);
-    addref();
-  }
-  inline ~OwnConnectionState() noexcept(false) {
-    deref();
-  }
-
-  inline OwnConnectionState& operator=(kj::Own<RpcConnectionState>&& other) {
-    deref();
-    inner = kj::mv(other);
-    addref();
-    return *this;
-  }
-  inline OwnConnectionState& operator=(OwnConnectionState&& other) {
-    deref();
-    inner = kj::mv(other.inner);
-    // no addref() because we're taking ownership of the existing ref
-    return *this;
-  }
-  template <RpcSystemBase::ConnectionStateOwner otherOwner>
-  inline OwnConnectionState& operator=(OwnConnectionState<otherOwner>&& other) {
-    other.deref();
-    inner = kj::mv(other.inner);
-    addref();
-    return *this;
-  }
-
-  inline RpcConnectionState* get() { return inner.get(); }
-  inline RpcConnectionState* operator->() { return inner.operator->(); }
-  inline RpcConnectionState& operator*() { return *inner; }
-
- private:
-  kj::Own<RpcConnectionState> inner;
-
-  template <RpcSystemBase::ConnectionStateOwner>
-  friend class OwnConnectionState;
-
-  // These methods need to be defined after `RpcConnectionState` since they modify its
-  // `refcountsByType` member.
-  inline void addref();
-  inline void deref();
-};
-
 class RpcSystemBase::RpcConnectionState final
     : public kj::TaskSet::ErrorHandler, public kj::Refcounted {
 public:
@@ -698,11 +622,6 @@ private:
   class RpcPipeline;
   class RpcCallContext;
   class RpcResponse;
-
-  template <RpcSystemBase::ConnectionStateOwner>
-  friend class OwnConnectionState;
-
-  uint refcountsByType[static_cast<uint>(ConnectionStateOwner::ENUM_COUNT)] = {};
 
   // =======================================================================================
   // The Four Tables entry types
@@ -934,6 +853,19 @@ private:
     }
   }
 
+  bool allTablesEmpty() {
+    // Returns true if all of the tables (imports, questions, etc.) are empty.
+    //
+    // More specifically, if this returns true, then calling disconnect() would not disrupt
+    // anything, because there's nothing to disrupt. This is important to decide if the connection
+    // is idle.
+
+    return questions.empty() && answers.empty() && exports.empty() && imports.empty() &&
+        // Technically the embargoes table should always be empty if the others are, but it's not
+        // expensive to check it.
+        embargoes.empty();
+  }
+
   void checkIfBecameIdle() {
     // Checks if the connection has become idle, and if so, informs the VatNetwork by calling
     // setIdle(true). Generally, this must be called after erasing an entry from any of the
@@ -941,13 +873,7 @@ private:
 
     if (idle) return;  // already idle
 
-    bool allTablesEmpty =
-        questions.empty() && answers.empty() && exports.empty() && imports.empty() &&
-        // Technically the embargoes table should always be empty if the others are, but it's not
-        // expensive to check it.
-        embargoes.empty();
-
-    if (!allTablesEmpty) {
+    if (!allTablesEmpty()) {
       // Not idle, don't do anything.
       return;
     }
@@ -1195,7 +1121,7 @@ private:
       return kj::addRef(*this);
     }
 
-    OwnConnectionState<ConnectionStateOwner::CLIENT> connectionState;
+    kj::Own<RpcConnectionState> connectionState;
 
     kj::Maybe<kj::Own<RpcFlowController>> flowController;
     // Becomes non-null the first time a streaming call is made on this capability.
@@ -2465,7 +2391,7 @@ private:
     }
 
   private:
-    kj::Maybe<OwnConnectionState<ConnectionStateOwner::QUESTION>> connectionState;
+    kj::Maybe<kj::Own<RpcConnectionState>> connectionState;
     QuestionId id;
     kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Promise<kj::Own<RpcResponse>>>>> fulfiller;
   };
@@ -2638,7 +2564,7 @@ private:
     }
 
   private:
-    OwnConnectionState<ConnectionStateOwner::REQUEST> connectionState;
+    kj::Own<RpcConnectionState> connectionState;
 
     kj::Own<RpcClient> target;
     kj::Own<OutgoingRpcMessage> message;
@@ -2864,7 +2790,7 @@ private:
     }
 
   private:
-    OwnConnectionState<ConnectionStateOwner::PIPELINE> connectionState;
+    kj::Own<RpcConnectionState> connectionState;
     kj::Maybe<kj::ForkedPromise<kj::Own<RpcResponse>>> redirectLater;
 
     typedef kj::Own<QuestionRef> Waiting;
@@ -2921,7 +2847,7 @@ private:
     }
 
   private:
-    OwnConnectionState<ConnectionStateOwner::RESPONSE> connectionState;
+    kj::Own<RpcConnectionState> connectionState;
     kj::Own<IncomingRpcMessage> message;
     ReaderCapabilityTable capTable;
     AnyPointer::Reader reader;
@@ -3460,7 +3386,7 @@ private:
     }
 
   private:
-    OwnConnectionState<ConnectionStateOwner::CALL_CONTEXT> connectionState;
+    kj::Own<RpcConnectionState> connectionState;
     AnswerId answerId;
 
     ClientHook::CallHints hints;
@@ -3588,23 +3514,18 @@ private:
             co_return;
           }
 
-          // At this point, the last reference to this connection state *should* be the one in
-          // the RpcSystem's map. The refcount should therefore be 1, and `isShared()`.
-          if (isShared()) {
-            // Oh, we still have references. We will need to set ourselves to the "disconnected"
-            // state.
-            // TODO(bug): Previously, I had a KJ_LOG(ERROR) here, and it did actually show up in
-            //   production, but I couldn't tell what was holding the reference. Hopefully,
-            //   propagating an explicit exception here will give us a stack trace that tells us
-            //   what's holding onto the connection.
-            kj::ArrayPtr<uint> refcounts = refcountsByType;
-            tasks.add(KJ_EXCEPTION(FAILED,
-                "RpcSystem bug: Connection shut down due to being idle, but if you're seeing "
-                "this error then apparently something was still using the connection. Please "
-                "take note of the stack and fix checkIfBecameIdle() to account for this kind of "
-                "reference still existing.", refcounts));
-            co_return;
-          }
+          // We shouldn't have become idle if the tables aren't empty. Double-check.
+          //
+          // Note that if any table is non-empty, then we need to call `disconnect()`, which
+          // iterates through all the tables and rejects the appropriate promises to propagate
+          // the error. But if the tables are empty, then we can skip disconnect() and just
+          // set the state to `Disconnected` below, which saves time and avoids spurious logging,
+          // hence why we're performing this check.
+          KJ_ASSERT(allTablesEmpty(),
+              // If the assert fails, let's log all the tables to try to figure out which is the
+              // culprit...
+              questions.empty(), answers.empty(), exports.empty(), imports.empty(),
+              embargoes.empty());
 
           // Make sure to mark ourselves as Disconnected so if the shutdown task fails it doesn't
           // cause us to call shutdown() again.
@@ -4641,20 +4562,6 @@ private:
   }
 };
 
-template <RpcSystemBase::ConnectionStateOwner owner>
-void RpcSystemBase::OwnConnectionState<owner>::addref() {
-  if (get() != nullptr) {
-    ++get()->refcountsByType[static_cast<uint>(owner)];
-  }
-}
-
-template <RpcSystemBase::ConnectionStateOwner owner>
-void RpcSystemBase::OwnConnectionState<owner>::deref() {
-  if (get() != nullptr) {
-    --get()->refcountsByType[static_cast<uint>(owner)];
-  }
-}
-
 // =======================================================================================
 
 class RpcSystemBase::Impl final: private BootstrapFactoryBase, private kj::TaskSet::ErrorHandler {
@@ -4674,7 +4581,7 @@ public:
       // We need to pull all the connections out of the map first, before calling disconnect on
       // them, since they will each remove themselves from the map which invalidates iterators.
       if (connections.size() > 0) {
-        kj::Vector<OwnConnectionState<ConnectionStateOwner::DELETE_ME_LIST>> deleteMe(connections.size());
+        kj::Vector<kj::Own<RpcConnectionState>> deleteMe(connections.size());
         kj::Exception shutdownException = KJ_EXCEPTION(DISCONNECTED, "RpcSystem was destroyed.");
         for (auto& entry: connections) {
           deleteMe.add(kj::mv(entry.value));
@@ -4736,8 +4643,7 @@ private:
   kj::Own<RpcSystemBrand> brand = kj::refcounted<RpcSystemBrand>();
   kj::TaskSet tasks;
 
-  typedef kj::HashMap<VatNetworkBase::Connection*,
-                      OwnConnectionState<ConnectionStateOwner::CONNECTION_MAP>>
+  typedef kj::HashMap<VatNetworkBase::Connection*, kj::Own<RpcConnectionState>>
       ConnectionMap;
   ConnectionMap connections;
 
