@@ -686,7 +686,7 @@ public:
 
   typedef kj::OneOf<kj::String, kj::Array<byte>, Close> Message;
 
-  static constexpr size_t SUGGESTED_MAX_MESSAGE_SIZE = 1u << 20;  // 1MB
+  static constexpr size_t SUGGESTED_MAX_MESSAGE_SIZE = 32u << 20;  // 32MB
 
   virtual kj::Promise<Message> receive(size_t maxSize = SUGGESTED_MAX_MESSAGE_SIZE) = 0;
   // Read one message from the WebSocket and return it. Can only call once at a time. Do not call
