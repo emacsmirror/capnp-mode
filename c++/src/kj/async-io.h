@@ -146,6 +146,14 @@ public:
   //
   // Unlike most other asynchronous stream methods, it is safe to call whenWriteDisconnected()
   // multiple times without canceling the previous promises.
+
+  virtual void abortWrite(kj::Exception&& exception) {}
+  // Communicates to the stream that it should stop accepting writes and should fail any
+  // pending writes with the given exception. This is intended to be used when the stream is
+  // being shutdown due to an error or explicit cancelation. The default implementation, however,
+  // does nothing for backwards compatibilty. Existing implementations of AsyncOutputStream that
+  // want to support this method should override it, existing implementations that don't need it
+  // can just ignore it.
 };
 
 class AsyncIoStream: public AsyncInputStream, public AsyncOutputStream {
