@@ -1,0 +1,41 @@
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+
+cc_capnp_library(
+    name = "addressbook_capnp",
+    srcs = [
+        "addressbook.capnp",
+    ],
+    include_prefix = ".",
+)
+
+cc_binary(
+    name = "addressbook",
+    srcs = ["addressbook.c++"],
+    deps = [":addressbook_capnp"],
+)
+
+cc_capnp_library(
+    name = "calculator_capnp",
+    srcs = [
+        "calculator.capnp",
+    ],
+    include_prefix = ".",
+)
+
+cc_binary(
+    name = "calculator-server",
+    srcs = ["calculator-server.c++"],
+    deps = [
+        ":calculator_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)
+
+cc_binary(
+    name = "calculator-client",
+    srcs = ["calculator-client.c++"],
+    deps = [
+        ":calculator_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+    ],
+)
