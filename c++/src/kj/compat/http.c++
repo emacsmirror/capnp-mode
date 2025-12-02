@@ -3382,7 +3382,7 @@ private:
     }
 
   private:
-    Result pumpOnce() {
+    kj::OneOf<Result, ProtocolError> pumpOnce() {
       // Prepares Zlib's internal state for a call to deflate/inflate, then calls the relevant
       // function to process the input buffer. It is assumed that the caller has already set up
       // Zlib's input buffer.
@@ -3406,6 +3406,13 @@ private:
           break;
         case Mode::DECOMPRESS:
           result = inflate(&ctx, Z_SYNC_FLUSH);
+          // inflate() returns Z_DATA_ERROR if the provided input is not valid compressed data.
+          // Return a protocol error in that case.
+          if (result == Z_DATA_ERROR) {
+              return ProtocolError {
+                  .statusCode = 1002,
+                  .description = "Invalid compressed data"};
+          }
           KJ_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END,
                       "Decompression failed", result, " with reason", ctx.msg);
           break;
@@ -3423,32 +3430,37 @@ private:
       kj::Vector<Result> output;
       size_t totalBytesProcessed = 0;
       for (;;) {
-        Result result = pumpOnce();
+        KJ_SWITCH_ONEOF(pumpOnce()) {
+          KJ_CASE_ONEOF(protocolError, ProtocolError) {
+            return kj::mv(protocolError);
+          }
+          KJ_CASE_ONEOF(result, Result) {
+            auto status = result.processResult;
+            auto bytesProcessed = result.size;
+            if (bytesProcessed > 0) {
+              output.add(kj::mv(result));
+              totalBytesProcessed += bytesProcessed;
+              KJ_IF_SOME(m, maxSize) {
+                // This is only non-null for `receive` calls, so we must be decompressing. We don't want
+                // the decompressed message to OOM us, so let's make sure it's not too big.
+                if (totalBytesProcessed > m) {
+                  return ProtocolError {
+                      .statusCode = 1009,
+                      .description = "Message is too large"};
+                }
+              }
+            }
 
-        auto status = result.processResult;
-        auto bytesProcessed = result.size;
-        if (bytesProcessed > 0) {
-          output.add(kj::mv(result));
-          totalBytesProcessed += bytesProcessed;
-          KJ_IF_SOME(m, maxSize) {
-            // This is only non-null for `receive` calls, so we must be decompressing. We don't want
-            // the decompressed message to OOM us, so let's make sure it's not too big.
-            if (totalBytesProcessed > m) {
-              return ProtocolError {
-                  .statusCode = 1009,
-                  .description = "Message is too large"};
+            if ((ctx.avail_in == 0 && ctx.avail_out != 0) || status == Z_STREAM_END) {
+              // If we're out of input to consume, and we have space in the output buffer, then we must
+              // have flushed the remaining message, so we're done pumping. Alternatively, if we found a
+              // BFINAL deflate block, then we know the stream is completely finished.
+              if (status == Z_STREAM_END) {
+                reset();
+              }
+              return kj::mv(output);
             }
           }
-        }
-
-        if ((ctx.avail_in == 0 && ctx.avail_out != 0) || status == Z_STREAM_END) {
-          // If we're out of input to consume, and we have space in the output buffer, then we must
-          // have flushed the remaining message, so we're done pumping. Alternatively, if we found a
-          // BFINAL deflate block, then we know the stream is completely finished.
-          if (status == Z_STREAM_END) {
-            reset();
-          }
-          return kj::mv(output);
         }
       }
     }
