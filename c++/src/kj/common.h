@@ -2175,6 +2175,23 @@ To& downcast(From& from) {
   return static_cast<To&>(from);
 }
 
+#if !KJ_NO_RTTI
+template <typename To, typename From>
+Maybe<To&> tryDowncast(From& from) {
+  // Identical to `dynamicDowncastIfAvailable()` except for use in code where RTTI is known to be
+  // enabled always. Use this when the calling code cannot cope with a spurious `none` result from
+  // RTTI being disabled.
+
+  // Force a compile error if To is not a subtype of From.  Cross-casting is rare; if it is needed
+  // we should have a separate cast function like tryCrosscast().
+  if (false) {
+    kj::implicitCast<From*>(kj::implicitCast<To*>(nullptr));
+  }
+
+  return dynamic_cast<To*>(&from);
+}
+#endif
+
 // =======================================================================================
 // Defer
 
