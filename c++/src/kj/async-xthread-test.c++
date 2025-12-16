@@ -1148,5 +1148,42 @@ KJ_TEST("cross-thread fulfiller created using Executor, used after Executor dies
   })();
 }
 
+#if CAPNP_EXPENSIVE_TESTS
+KJ_TEST("executeSync() called during executor shutdown doesn't hang") {
+  // Exact timing is tricky. With 1000 loops the problem usually reproduces, but the test takes
+  // 10 seconds in debug mode, so we only run when CAPNP_EXPENSIVE_TESTS is set (release tests).
+  for (size_t i = 0; i < 1000; ++i) {
+    MutexGuarded<bool> setup(false);
+    Own<const Executor> exec;
+
+    Thread thread([&]() noexcept {
+      KJ_XTHREAD_TEST_SETUP_LOOP;
+      exec = getCurrentThreadExecutor().addRef();
+      delay();
+      *setup.lockExclusive() = true;
+    });
+
+    ([&]() noexcept {
+      auto lock = setup.lockExclusive();
+      lock.wait([&](bool value) { return value; });
+
+      bool ret = false;
+      if (exec->isLive()) {
+        try {
+          ret = exec->executeSync([]() {
+            return true;
+          });
+          KJ_EXPECT(ret == true);
+        } catch (const kj::Exception&) {
+          KJ_EXPECT(ret == false);
+        }
+      } else {
+        KJ_EXPECT(ret == false);
+      }
+    })();
+  }
+}
+#endif  // CAPNP_EXPENSIVE_TESTS
+
 }  // namespace
 }  // namespace kj
