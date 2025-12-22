@@ -2566,10 +2566,58 @@ private:
   kj::Maybe<kj::Own<AsyncOutputStream>> stream;
 };
 
+class PromisedAsyncInputStream final: public kj::AsyncInputStream {
+  // An AsyncInputStream which waits for a promise to resolve then forwards all calls to the
+  // promised stream.
+  //
+  // TODO(cleanup): Can this share implementation with PromiseIoStream? Seems hard.
+
+public:
+  PromisedAsyncInputStream(kj::Promise<kj::Own<AsyncInputStream>> promise)
+      : promise(promise.then([this](kj::Own<AsyncInputStream> result) {
+          stream = kj::mv(result);
+        }).fork()) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    KJ_IF_SOME(s, stream) {
+      return s->tryRead(buffer, minBytes, maxBytes);
+    } else {
+      return promise.addBranch().then([this,buffer,minBytes,maxBytes]() {
+        return KJ_ASSERT_NONNULL(stream)->tryRead(buffer, minBytes, maxBytes);
+      });
+    }
+  }
+
+  kj::Maybe<uint64_t> tryGetLength() override {
+    KJ_IF_SOME(s, stream) {
+      return s->tryGetLength();
+    } else {
+      return kj::none;
+    }
+  }
+
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    KJ_IF_SOME(s, stream) {
+      return s->pumpTo(output, amount);
+    } else {
+      return promise.addBranch().then([this,&output,amount]() {
+        return KJ_ASSERT_NONNULL(stream)->pumpTo(output, amount);
+      });
+    }
+  }
+
+private:
+  kj::ForkedPromise<void> promise;
+  kj::Maybe<kj::Own<AsyncInputStream>> stream;
+};
+
 }  // namespace
 
 Own<AsyncOutputStream> newPromisedStream(Promise<Own<AsyncOutputStream>> promise) {
   return heap<PromisedAsyncOutputStream>(kj::mv(promise));
+}
+Own<AsyncInputStream> newPromisedStream(Promise<Own<AsyncInputStream>> promise) {
+  return heap<PromisedAsyncInputStream>(kj::mv(promise));
 }
 Own<AsyncIoStream> newPromisedStream(Promise<Own<AsyncIoStream>> promise) {
   return heap<PromisedAsyncIoStream>(kj::mv(promise));
