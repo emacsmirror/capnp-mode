@@ -1008,11 +1008,19 @@ TEST(Capability, CapabilityServerSet) {
   EXPECT_EQ(&server1, &KJ_ASSERT_NONNULL(set1.getLocalServer(client1).wait(waitScope)));
   EXPECT_EQ(&server2, &KJ_ASSERT_NONNULL(set2.getLocalServer(client2).wait(waitScope)));
 
+  EXPECT_EQ(&server1, &KJ_ASSERT_NONNULL(set1.tryGetLocalServerSync(client1)));
+  EXPECT_EQ(&server2, &KJ_ASSERT_NONNULL(set2.tryGetLocalServerSync(client2)));
+
   // Getting the local server using the wrong set doesn't work.
   EXPECT_TRUE(set1.getLocalServer(client2).wait(waitScope) == kj::none);
   EXPECT_TRUE(set2.getLocalServer(client1).wait(waitScope) == kj::none);
   EXPECT_TRUE(set1.getLocalServer(clientStandalone).wait(waitScope) == kj::none);
   EXPECT_TRUE(set1.getLocalServer(clientNull).wait(waitScope) == kj::none);
+
+  EXPECT_TRUE(set1.tryGetLocalServerSync(client2) == kj::none);
+  EXPECT_TRUE(set2.tryGetLocalServerSync(client1) == kj::none);
+  EXPECT_TRUE(set1.tryGetLocalServerSync(clientStandalone) == kj::none);
+  EXPECT_TRUE(set1.tryGetLocalServerSync(clientNull) == kj::none);
 
   // A promise client waits to be resolved.
   auto paf = kj::newPromiseAndFulfiller<test::TestInterface::Client>();
@@ -1020,6 +1028,11 @@ TEST(Capability, CapabilityServerSet) {
 
   auto errorPaf = kj::newPromiseAndFulfiller<test::TestInterface::Client>();
   test::TestInterface::Client errorPromise = kj::mv(errorPaf.promise);
+
+  // tryGetLocalServerSync() fails on unresolved promises
+  KJ_EXPECT(set1.tryGetLocalServerSync(clientPromise) == kj::none);
+  KJ_EXPECT(set2.tryGetLocalServerSync(clientPromise) == kj::none);
+  KJ_EXPECT(set1.tryGetLocalServerSync(errorPromise) == kj::none);
 
   bool resolved1 = false, resolved2 = false, resolved3 = false;
   auto promise1 = set1.getLocalServer(clientPromise)
@@ -1049,6 +1062,10 @@ TEST(Capability, CapabilityServerSet) {
   EXPECT_FALSE(resolved2);
   EXPECT_FALSE(resolved3);
 
+  KJ_EXPECT(set1.tryGetLocalServerSync(clientPromise) == kj::none);
+  KJ_EXPECT(set2.tryGetLocalServerSync(clientPromise) == kj::none);
+  KJ_EXPECT(set1.tryGetLocalServerSync(errorPromise) == kj::none);
+
   paf.fulfiller->fulfill(kj::cp(client1));
   errorPaf.fulfiller->reject(KJ_EXCEPTION(FAILED, "foo"));
 
@@ -1059,6 +1076,15 @@ TEST(Capability, CapabilityServerSet) {
   EXPECT_TRUE(resolved1);
   EXPECT_TRUE(resolved2);
   EXPECT_TRUE(resolved3);
+
+  // Now that promises have resolved, tryGetLocalServerSync() succeeds.
+  KJ_EXPECT(&KJ_ASSERT_NONNULL(set1.tryGetLocalServerSync(clientPromise)) == &server1);
+
+  // But still doesn't succeed when there isn't a match.
+  KJ_EXPECT(set2.tryGetLocalServerSync(clientPromise) == kj::none);
+
+  // And doesn't succeed (nor throw) on an error promise.
+  KJ_EXPECT(set1.tryGetLocalServerSync(errorPromise) == kj::none);
 }
 
 class TestThisCap final: public test::TestInterface::Server {
