@@ -64,7 +64,7 @@ set(capnp_schemas
 )
 add_library(capnp ${capnp_sources})
 add_library(CapnProto::capnp ALIAS capnp)
-target_link_libraries(capnp PUBLIC kj)
+target_link_libraries(capnp PUBLIC kj-async kj)
 #make sure external consumers don't need to manually set the include dirs
 get_filename_component(PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
 target_include_directories(capnp INTERFACE
