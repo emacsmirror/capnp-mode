@@ -761,6 +761,46 @@ namespace {
       "mcontext_t should be an extension of CONTEXT");
   memcpy(&win32Context, &ucontext->uc_mcontext, sizeof(win32Context));
   auto trace = getStackTrace(traceSpace, 0, GetCurrentThread(), win32Context);
+#elif __linux__ && __x86_64__
+  kj::ArrayPtr<void* const> trace;
+
+  // If we're dealing with a segfault, certain kinds of segfaults can confuse glibc's backtrace().
+  // Let's try to detect these and make things easier for it.
+  ucontext_t* ucontext = reinterpret_cast<ucontext_t*>(context);
+
+  if (signo == SIGSEGV && (void*)ucontext->uc_mcontext.gregs[REG_RIP] == info->si_addr) {
+    // The instruction pointer is the address that caused the fault. This implies that we jumped
+    // to an invalid address. glibc's backtrace() doesn't know what to do with this. It tries
+    // to look up unwind tables for this address, but it doesn't find any, so it gives up -- or
+    // worse, it crashes, which leads to no crash report at all.
+    //
+    // Luckily, it's almost always the case that such a jump was a CALL instruction (not a JMP
+    // instruction), as most likely we invoked an invalid function pointer or virtual table
+    // entry. A CALL instruction pushes the return address to the stack before jumping. That
+    // means that the instruction address we *really* want is easy to find -- the stack pointer
+    // is pointing to it!
+    //
+    // Also fortunate is that glibc's backtrace() uses the same ucontext object that was passed
+    // to the signal handler. If we modify it, backtrace() will use the modified version. So
+    // let's just fix it up.
+
+    // Copy top of stack into RIP.
+    ucontext->uc_mcontext.gregs[REG_RIP] =
+        *reinterpret_cast<intptr_t*>(ucontext->uc_mcontext.gregs[REG_RSP]);
+
+    // Pop stack. (Stack grows down.)
+    ucontext->uc_mcontext.gregs[REG_RSP] += sizeof(void*);
+
+    // Now trace from here. In order to capture the invalid jump, we prepend the invalid address
+    // to the trace.
+    kj::ArrayPtr<void*> traceArr(traceSpace);
+    trace = kj::getStackTrace(traceArr.slice(1, traceArr.size()), 3);
+    trace = kj::arrayPtr(trace.begin() - 1, trace.end());
+    const_cast<void*&>(trace[0]) = info->si_addr;
+  } else {
+    // ignoreCount = 2 to ignore crashHandler() and signal trampoline.
+    trace = getStackTrace(traceSpace, 2);
+  }
 #else
   // ignoreCount = 2 to ignore crashHandler() and signal trampoline.
   auto trace = getStackTrace(traceSpace, 2);
@@ -944,7 +984,7 @@ String KJ_STRINGIFY(const Exception& e) {
              stringifyStackTrace(e.getStackTrace()));
 }
 
-static_assert(sizeof(kj::Exception) == 2 * sizeof(size_t), 
+static_assert(sizeof(kj::Exception) == 2 * sizeof(size_t),
     "exception type is too big, please keep it lean");
 
 Exception::Exception(Type type, const char* file, int line, String description) noexcept {
