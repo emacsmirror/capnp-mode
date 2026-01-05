@@ -699,6 +699,7 @@ class CapabilityServerSetBase {
 public:
   Capability::Client addInternal(kj::Own<Capability::Server>&& server, void* ptr);
   kj::Promise<void*> getLocalServerInternal(Capability::Client& client);
+  void* tryGetLocalServerSyncInternal(Capability::Client& client);
 };
 
 }  // namespace _ (private)
@@ -730,6 +731,15 @@ public:
   // wait for it to resolve. Keep in mind that the server will be deleted when all clients are
   // gone, so the caller should make sure to keep the client alive (hence why this method only
   // accepts an lvalue input).
+
+  kj::Maybe<typename T::Server&> tryGetLocalServerSync(typename T::Client& client);
+  // Like getLocalServer() but attempts to unwrap synchronously. A null return value does not
+  // necessarily mean that the capability isn't part of this set, just that it isn't known yet;
+  // in this case you must fall back to `getLocalServer()`. (In particular, if the capability is
+  // a promise, it's necessary to wait for it to resolve.)
+  //
+  // DANGER: Capabilities can be promises more often than you think. Be very careful about using
+  // this. If in doubt, don't.
 };
 
 // =======================================================================================
@@ -1309,6 +1319,17 @@ kj::Promise<kj::Maybe<typename T::Server&>> CapabilityServerSet<T>::getLocalServ
       return *reinterpret_cast<typename T::Server*>(server);
     }
   });
+}
+
+template <typename T>
+kj::Maybe<typename T::Server&> CapabilityServerSet<T>::tryGetLocalServerSync(
+    typename T::Client& client) {
+  void* server = tryGetLocalServerSyncInternal(client);
+  if (server == nullptr) {
+    return kj::none;
+  } else {
+    return *reinterpret_cast<typename T::Server*>(server);
+  }
 }
 
 template <typename T>

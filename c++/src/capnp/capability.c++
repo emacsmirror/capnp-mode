@@ -720,6 +720,14 @@ public:
     }
   }
 
+  void* tryGetLocalServerSync(_::CapabilityServerSetBase& capServerSet) {
+    if (this->capServerSet == &capServerSet && !blocked) {
+      return ptr;
+    } else {
+      return nullptr;
+    }
+  }
+
   kj::Maybe<int> getFd() override {
     KJ_IF_SOME(s, server) {
       return s->getFd();
@@ -1199,6 +1207,26 @@ kj::Promise<void*> CapabilityServerSetBase::getLocalServerInternal(Capability::C
     // Cap is settled, so it definitely will never resolve to a member of this set.
     return kj::implicitCast<void*>(nullptr);
   }
+}
+
+void* CapabilityServerSetBase::tryGetLocalServerSyncInternal(Capability::Client& client) {
+  ClientHook* hook = client.hook.get();
+
+  // Get the most-resolved-so-far version of the hook.
+  for (;;) {
+    KJ_IF_SOME(h, hook->getResolved()) {
+      hook = &h;
+    } else {
+      break;
+    }
+  }
+
+  // Try to unwrap that.
+  if (hook->isBrand(&LocalClient::BRAND)) {
+    return kj::downcast<LocalClient>(*hook).tryGetLocalServerSync(*this);
+  }
+
+  return nullptr;
 }
 
 }  // namespace _ (private)
