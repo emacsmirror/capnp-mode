@@ -370,6 +370,7 @@ Tee newTee(Own<AsyncInputStream> input, uint64_t limit = kj::maxValue);
 // It is recommended that you use a more conservative value for `limit` than the default.
 
 Own<AsyncOutputStream> newPromisedStream(Promise<Own<AsyncOutputStream>> promise);
+Own<AsyncInputStream> newPromisedStream(Promise<Own<AsyncInputStream>> promise);
 Own<AsyncIoStream> newPromisedStream(Promise<Own<AsyncIoStream>> promise);
 // Constructs an Async*Stream which waits for a promise to resolve, then forwards all calls to the
 // promised stream.
