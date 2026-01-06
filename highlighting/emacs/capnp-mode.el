@@ -20,16 +20,6 @@
 
 ;;; Code:
 
-;; command to comment/uncomment text
-(defun capnp-comment-dwim (arg)
-  "Comment or uncomment current line or region in a smart way.
-For detail, see `comment-dwim' for ARG explanation."
-  (interactive "*P")
-  (require 'newcomment)
-  (let (
-        (comment-start "#") (comment-end ""))
-    (comment-dwim arg)))
-
 (defvar capnp--syntax-table
   (let ((syn-table (make-syntax-table)))
 
@@ -65,11 +55,10 @@ For detail, see `comment-dwim' for ARG explanation."
   "capn-mode is a major mode for editing capnp protocol files"
   :syntax-table capnp--syntax-table
 
+  (setq-local comment-start "# ")
+  (setq-local comment-start-skip "#+\\s-*")
   (setq font-lock-defaults '((capnp--font-lock-keywords)))
-
-
-  (setq mode-name "capnp")
-  (define-key capnp-mode-map [remap comment-dwim] 'capnp-comment-dwim))
+  (setq mode-name "capnp"))
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.capnp\\'" . capnp-mode))
