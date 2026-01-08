@@ -1663,6 +1663,28 @@ public:
     }
   }
 
+  Promise<uint64_t> pumpTo(AsyncOutputStream& output, uint64_t amount) {
+    KJ_REQUIRE(onMessageDone != kj::none);
+
+    if (leftover == nullptr) {
+      // No leftovers. Forward directly to inner stream.
+      co_return co_await inner.pumpTo(output, amount);
+    } else if (leftover.size() >= amount) {
+      // Didn't even read the entire leftover buffer.
+      co_await output.write(leftover.first(amount).asBytes());
+      leftover = leftover.slice(amount, leftover.size());
+      co_return amount;
+    } else {
+      // Read the entire leftover buffer, plus some.
+      co_await output.write(leftover.asBytes());
+      size_t firstWrite = leftover.size();
+      leftover = nullptr;
+
+      auto rest = co_await inner.pumpTo(output, amount - firstWrite);
+      co_return firstWrite + rest;
+    }
+  }
+
   enum RequestOrResponse {
     REQUEST,
     RESPONSE
@@ -2053,9 +2075,66 @@ public:
     }
   }
 
+  Promise<uint64_t> pumpTo(AsyncOutputStream& output, uint64_t amount) override {
+    // SUBTLE: Before we go and implement pumpTo() ourselves, let's try to call
+    //   output.tryPumpFrom(). This is not because we think `output` might have some sort of
+    //   optimization that recognizes `HttpFixedLengthEntityReader` specifically, but rather
+    //   because if `output` never actually gets hooked up to anything, we'd like to avoid marking
+    //   ourselves dirty. In particular, if `output` is a PromisedOutputStream or one end of an
+    //   `AsyncPipe`, then its `tryPumpFrom()` will return a promise that first waits to find out
+    //   where the output will eventually flow to, then calls `input.pumpTo()` to pump directly to
+    //   that destination. That call to `pumpTo()` comes right back to *this* object, but with
+    //   a new `output`. Eventually, when we get hooked up to a stream whose `tryPumpFrom()`
+    //   returns null, THEN we have found our final destination, and we can mark ourselves dirty.
+    //
+    //   If we don't do this, there are cases where we'll set `clean = false` too soon, even though
+    //   the pump ends up being canceled before it actually connects to anything. This in turn
+    //   breaks the logic which tries to discard the request body if the app never read it -- we
+    //   can't discard the request body if we don't know how much there is to discard, and if
+    //   `clean = false` then we must assume we don't know.
+    KJ_IF_SOME(promise, output.tryPumpFrom(*this, amount)) {
+      return kj::mv(promise);
+    } else {
+      return pumpToImpl(output, amount);
+    }
+  }
+
 private:
   size_t length;
   bool clean = true;
+
+  Promise<uint64_t> pumpToImpl(AsyncOutputStream& output, uint64_t amount) {
+    KJ_REQUIRE(clean, "can't read more data after a previous read didn't complete");
+    clean = false;
+
+    // Clamp to the expected length.
+    if (amount > length) amount = length;
+
+    if (amount == 0) {
+      clean = true;
+      co_return 0;
+    }
+
+    auto actual = co_await getInner().pumpTo(output, amount);
+    length -= actual;
+
+    if (length == 0) {
+      doneReading();
+    } else if (actual < amount) {
+      // We hit EOF before pumping what was expected, but this means the stream ended prematurely
+      // without reaching the expected content-length, so throw an exception instead.
+      size_t expectedLength = length + actual;
+      kj::throwRecoverableException(KJ_EXCEPTION(
+        DISCONNECTED,
+        "premature EOF in HTTP entity body; did not reach Content-Length",
+        expectedLength,
+        actual
+      ));
+    }
+
+    clean = true;
+    co_return actual;
+  }
 };
 
 class HttpChunkedEntityReader final: public HttpEntityBodyReader {
