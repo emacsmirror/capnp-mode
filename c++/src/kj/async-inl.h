@@ -2506,18 +2506,12 @@ public:
   explicit PromiseAwaiter(OwnPromiseNode&& node): PromiseAwaiterBase(kj::mv(node)) {}
 
   KJ_NOINLINE T await_resume() {
-    // This is marked noinline in order to ensure __builtin_return_address() is accurate for stack
+    // This is marked noinline in order to ensure KJ_CALLING_ADDRESS() is accurate for stack
     // trace purposes. In my experimentation, this method was not inlined anyway even in opt
     // builds, but I want to make sure it doesn't suddenly start being inlined later causing stack
     // traces to break. (I also tried always-inline, but this did not appear to cause the compiler
     // to inline the method -- perhaps a limitation of coroutines?)
-#if __GNUC__
-    awaitResumeImpl(result, __builtin_return_address(0));
-#elif _MSC_VER
-    awaitResumeImpl(result, _ReturnAddress());
-#else
-    #error "please implement for your compiler"
-#endif
+    awaitResumeImpl(result, KJ_CALLING_ADDRESS());
     auto value = kj::_::readMaybe(result.value);
     KJ_IASSERT(value != nullptr, "Neither exception nor value present.");
     return T(kj::mv(*value));

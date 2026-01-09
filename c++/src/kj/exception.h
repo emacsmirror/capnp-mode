@@ -196,6 +196,27 @@ private:
   friend class ExceptionImpl;
 };
 
+#if __GNUC__
+#define KJ_RETURN_ADDRESS() __builtin_return_address(0)
+#elif _MSC_VER
+#define KJ_RETURN_ADDRESS() _ReturnAddress()
+#else
+  #error "please implement for your compiler"
+#endif
+// KJ_RETURN_ADDRESS() returns a pointer to the code location within the current function's caller
+// where execution will resume when the current function returns.
+
+#define KJ_CALLING_ADDRESS() \
+    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(KJ_RETURN_ADDRESS()) - 1)
+// KJ_CALLING_ADDRESS() returns a pointer to the code that called the current function, suitable
+// for passing to Exception::addTrace().
+//
+// (It actually returns a pointer to the byte before the return address -- which may not be on an
+// instruction boundary, but addr2line still maps it to the caller source location.)
+//
+// Functions that the compiler decides to inline may return locations in the caller's caller,
+// etc.; if this is not desired, the function invoking the macro should be marked KJ_NOINLINE.
+
 struct CanceledException { };
 // This exception is thrown to force-unwind a stack in order to immediately cancel whatever that
 // stack was doing. It is used in the implementation of fibers in particular. Application code
@@ -419,7 +440,7 @@ KJ_NOINLINE ArrayPtr<void* const> getStackTrace(ArrayPtr<void*> space, uint igno
 
 String stringifyStackTrace(ArrayPtr<void* const>);
 // Convert the stack trace to a string with file names and line numbers. This may involve executing
-// suprocesses.
+// subprocesses.
 
 String stringifyStackTraceAddresses(ArrayPtr<void* const> trace);
 StringPtr stringifyStackTraceAddresses(ArrayPtr<void* const> trace, ArrayPtr<char> scratch);

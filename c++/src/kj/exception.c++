@@ -1090,13 +1090,7 @@ void Exception::addTrace(void* ptr) {
 }
 
 void Exception::addTraceHere() {
-#if __GNUC__
-  addTrace(__builtin_return_address(0));
-#elif _MSC_VER
-  addTrace(_ReturnAddress());
-#else
-  #error "please implement for your compiler"
-#endif
+  addTrace(KJ_CALLING_ADDRESS());
 }
 
 kj::Maybe<kj::ArrayPtr<const byte>> Exception::getDetail(DetailTypeId typeId) const {
