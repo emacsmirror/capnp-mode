@@ -2456,7 +2456,7 @@ void AttachmentPromiseNodeBase::get(ExceptionOrValue& output) noexcept {
 void AttachmentPromiseNodeBase::tracePromise(TraceBuilder& builder, bool stopAtNextEvent) {
   dependency->tracePromise(builder, stopAtNextEvent);
 
-  // TODO(debug): Maybe use __builtin_return_address to get the locations that called fork() and
+  // TODO(debug): Maybe use KJ_CALLING_ADDRESS() to get the locations that called fork() and
   //   addBranch()?
 }
 
@@ -2558,7 +2558,7 @@ void ForkBranchBase::tracePromise(TraceBuilder& builder, bool stopAtNextEvent) {
     hub->inner->tracePromise(builder, false);
   }
 
-  // TODO(debug): Maybe use __builtin_return_address to get the locations that called fork() and
+  // TODO(debug): Maybe use KJ_CALLING_ADDRESS() to get the locations that called fork() and
   //   addBranch()?
 }
 
@@ -2743,7 +2743,7 @@ void ExclusiveJoinPromiseNode::get(ExceptionOrValue& output) noexcept {
 }
 
 void ExclusiveJoinPromiseNode::tracePromise(TraceBuilder& builder, bool stopAtNextEvent) {
-  // TODO(debug): Maybe use __builtin_return_address to get the locations that called
+  // TODO(debug): Maybe use KJ_CALLING_ADDRESS() to get the locations that called
   //   exclusiveJoin()?
 
   if (stopAtNextEvent) return;
@@ -2846,7 +2846,7 @@ void ArrayJoinPromiseNodeBase::get(ExceptionOrValue& output) noexcept {
 }
 
 void ArrayJoinPromiseNodeBase::tracePromise(TraceBuilder& builder, bool stopAtNextEvent) {
-  // TODO(debug): Maybe use __builtin_return_address to get the locations that called
+  // TODO(debug): Maybe use KJ_CALLING_ADDRESS() to get the locations that called
   //   joinPromises()?
 
   if (stopAtNextEvent) return;
@@ -3087,7 +3087,7 @@ void EagerPromiseNodeBase::onReady(Event* event) noexcept {
 }
 
 void EagerPromiseNodeBase::tracePromise(TraceBuilder& builder, bool stopAtNextEvent) {
-  // TODO(debug): Maybe use __builtin_return_address to get the locations that called
+  // TODO(debug): Maybe use KJ_CALLING_ADDRESS() to get the locations that called
   //   eagerlyEvaluate()? But note that if a non-null exception handler was passed to it, that
   //   creates a TransformPromiseNode which will report the location anyhow.
 
@@ -3320,9 +3320,7 @@ void PromiseAwaiterBase::awaitResumeImpl(ExceptionOrValue& result, void* awaited
 
   KJ_IF_SOME(exception, result.exception) {
     // Manually extend the stack trace with the instruction address where the co_await occurred.
-    // Subtract 1 from the address to be consistent with `getStackTrace()` in `exception.c++` (see
-    // comment there).
-    exception.addTrace(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(awaitedAt) - 1));
+    exception.addTrace(awaitedAt);
 
     // Pass kj::maxValue for ignoreCount here so that `throwFatalException()` doesn't try to
     // extend the stack trace. There's no point in extending the trace beyond the single frame we
