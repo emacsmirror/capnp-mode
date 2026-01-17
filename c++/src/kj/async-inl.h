@@ -2274,7 +2274,7 @@ public:
 
   auto initial_suspend() { return stdcoro::suspend_never(); }
   auto final_suspend() noexcept {
-#if _MSC_VER && !defined(__clang__)
+#if !defined(__clang__)
     // See comment at `finalSuspendCalled`'s definition.
     finalSuspendCalled = true;
 #endif
@@ -2334,9 +2334,9 @@ private:
 
   bool hasSuspendedAtLeastOnce = false;
 
-#if _MSC_VER && !defined(__clang__)
+#if !defined(__clang__)
   bool finalSuspendCalled = false;
-  // MSVC erroneously reports the coroutine as done (that is, `coroutine.done()` returns true)
+  // MSVC and GCC erroneously report the coroutine as done (that is, `coroutine.done()` returns true)
   // seemingly as soon as `return_value()`/`return_void()` are called. This matters in our
   // implementation of `unhandled_exception()`, which must arrange to propagate exceptions during
   // coroutine frame unwind via the returned promise, even if `return_value()`/`return_void()` have
