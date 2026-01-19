@@ -1178,13 +1178,6 @@ public:
       ctor(value, other.value);
     }
   }
-  template <typename U>
-  inline NullableValue(const NullableValue<U&>& other)
-      : isSet(other.isSet) {
-    if (isSet) {
-      ctor(value, *other.ptr);
-    }
-  }
   inline NullableValue(decltype(nullptr)): isSet(false) {}
 
   inline NullableValue& operator=(NullableValue&& other) {
@@ -1246,15 +1239,6 @@ public:
   }
   template <typename U>
   inline NullableValue& operator=(const NullableValue<U>& other) {
-    if (other.isSet) {
-      emplace(other.value);
-    } else {
-      *this = nullptr;
-    }
-    return *this;
-  }
-  template <typename U>
-  inline NullableValue& operator=(const NullableValue<U&>& other) {
     if (other.isSet) {
       emplace(other.value);
     } else {
