@@ -3178,7 +3178,13 @@ void CoroutineBase::unhandledExceptionImpl(ExceptionOrValue& resultRef) {
   auto exception = getCaughtExceptionAsKj();
 
   KJ_IF_SOME(disposalResults, maybeDisposalResults) {
-    // Exception during coroutine destruction. Only record the first one.
+    // Exception during coroutine destruction.
+    if (!isDone()) {
+      // do not report destructor exception during cancellation.
+      return;
+    }
+
+    // Record only the first one.
     if (disposalResults.exception == kj::none) {
       disposalResults.exception = kj::mv(exception);
     }
@@ -3197,13 +3203,7 @@ void CoroutineBase::unhandledExceptionImpl(ExceptionOrValue& resultRef) {
     // Event we may have armed has not yet fired, because we haven't had a chance to return to
     // the event loop.
 
-    // final_suspend() has not been called.
-#if _MSC_VER && !defined(__clang__)
-    // See comment at `finalSuspendCalled`'s definition.
-    KJ_IASSERT(!finalSuspendCalled);
-#else
-    KJ_IASSERT(!coroutine.done());
-#endif
+    KJ_IASSERT(!isDone());
 
     // Since final_suspend() hasn't been called, whatever Event is waiting on us has not fired,
     // and will see this exception.
