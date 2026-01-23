@@ -513,14 +513,15 @@ KJ_NOINLINE void throwRecoverableException(kj::Exception&& exception, uint ignor
 // `KJ_IF_CATCH(e)` macro that supports a trailing `else` clause. That said, such patterns are
 // probably ill-advised to begin with.
 
-#if __GNUC__ || __clang__
-// Both clang and GCC understand the GCC set of pragma directives.
+#if __clang__
+// clang understands the GCC set of pragma directives.
+// Not applied to GCC due to Bug 78657 (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78657).
 #define KJ_SILENCE_SHADOWING_BEGIN \
     _Pragma("GCC diagnostic push") \
     _Pragma("GCC diagnostic ignored \"-Wshadow\"")
 #define KJ_SILENCE_SHADOWING_END \
     _Pragma("GCC diagnostic pop")
-#elif defined(_MSC_VER)  // __GNUC__ || __clang__
+#elif defined(_MSC_VER)  // __clang__
 // https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-studio-2015/code-quality/c6244
 #define KJ_SILENCE_SHADOWING_BEGIN \
     _Pragma("warning(push)") \
@@ -528,7 +529,8 @@ KJ_NOINLINE void throwRecoverableException(kj::Exception&& exception, uint ignor
 #define KJ_SILENCE_SHADOWING_END \
     _Pragma("warning(pop)")
 #else  // defined(_MSC_VER)
-// We only support clang, gcc, and MSVC, but for consistency's sake, let's define empty macros here.
+// We only support clang, gcc, and MSVC.
+// For GCC and consistency's sake, let's define empty macros here.
 #define KJ_SILENCE_SHADOWING_BEGIN
 #define KJ_SILENCE_SHADOWING_END
 #endif
