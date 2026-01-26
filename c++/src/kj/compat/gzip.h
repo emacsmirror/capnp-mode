@@ -31,6 +31,10 @@ namespace kj {
 
 namespace _ {  // private
 
+// Default buffer size for gzip streams. Larger buffers reduce per-call overhead but use more
+// memory. 4 KiB is the historical default, but note that many uses may want to increase this.
+// Testing on an amd64 Linux machine gets about 2 GiB/s at 16 KiB vs 850 MiB/s at 4 KiB.
+// TODO(perf): Should we just bump this to 16 KiB by default?
 constexpr size_t KJ_GZ_BUF_SIZE = 4096;
 
 class GzipOutputContext final {
@@ -96,7 +100,7 @@ private:
 
 class GzipAsyncInputStream final: public AsyncInputStream {
 public:
-  GzipAsyncInputStream(AsyncInputStream& inner);
+  GzipAsyncInputStream(AsyncInputStream& inner, size_t bufferSize = _::KJ_GZ_BUF_SIZE);
   ~GzipAsyncInputStream() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(GzipAsyncInputStream);
 
@@ -107,7 +111,7 @@ private:
   z_stream ctx = {};
   bool atValidEndpoint = false;
 
-  byte buffer[_::KJ_GZ_BUF_SIZE];
+  kj::Array<byte> buffer;
 
   Promise<size_t> readImpl(byte* buffer, size_t minBytes, size_t maxBytes, size_t alreadyRead);
 };
