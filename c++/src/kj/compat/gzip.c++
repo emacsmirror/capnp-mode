@@ -179,8 +179,8 @@ void GzipOutputStream::pump(int flush) {
 
 // =======================================================================================
 
-GzipAsyncInputStream::GzipAsyncInputStream(AsyncInputStream& inner)
-    : inner(inner) {
+GzipAsyncInputStream::GzipAsyncInputStream(AsyncInputStream& inner, size_t bufferSize)
+    : inner(inner), buffer(kj::heapArray<byte>(bufferSize)) {
   // windowBits = 15 (maximum) + magic value 16 to ask for gzip.
   KJ_ASSERT(inflateInit2(&ctx, 15 + 16) == Z_OK);
 }
@@ -198,7 +198,7 @@ Promise<size_t> GzipAsyncInputStream::tryRead(void* out, size_t minBytes, size_t
 Promise<size_t> GzipAsyncInputStream::readImpl(
     byte* out, size_t minBytes, size_t maxBytes, size_t alreadyRead) {
   if (ctx.avail_in == 0) {
-    return inner.tryRead(buffer, 1, sizeof(buffer))
+    return inner.tryRead(buffer.begin(), 1, buffer.size())
         .then([this,out,minBytes,maxBytes,alreadyRead](size_t amount) -> Promise<size_t> {
       if (amount == 0) {
         if (!atValidEndpoint) {
@@ -206,7 +206,7 @@ Promise<size_t> GzipAsyncInputStream::readImpl(
         }
         return alreadyRead;
       } else {
-        ctx.next_in = buffer;
+        ctx.next_in = buffer.begin();
         ctx.avail_in = amount;
         return readImpl(out, minBytes, maxBytes, alreadyRead);
       }
