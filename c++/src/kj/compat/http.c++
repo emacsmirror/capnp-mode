@@ -6604,11 +6604,11 @@ class ConcurrencyLimitingHttpClient final: public HttpClient {
 public:
   KJ_DISALLOW_COPY_AND_MOVE(ConcurrencyLimitingHttpClient);
   ConcurrencyLimitingHttpClient(
-      kj::HttpClient& inner, uint maxConcurrentRequests,
-      kj::Function<void(uint runningCount, uint pendingCount)> countChangedCallback)
+      kj::HttpClient& inner, ConcurrencyLimitingHttpClientSettings settings)
       : inner(inner),
-        maxConcurrentRequests(maxConcurrentRequests),
-        countChangedCallback(kj::mv(countChangedCallback)) {}
+        maxConcurrentRequests(settings.maxConcurrentRequests),
+        countChangedCallback(kj::mv(settings.countChangedCallback)),
+        releaseSlotOnHeadersReceived(settings.releaseSlotOnHeadersReceived) {}
 
   ~ConcurrencyLimitingHttpClient() noexcept {
     // Crash in this case because otherwise we'll have UAF later on.
@@ -6623,7 +6623,9 @@ public:
       auto counter = ConnectionCounter(*this);
       auto request = inner.request(method, url, headers, expectedBodySize);
       fireCountChanged();
-      auto promise = attachCounter(kj::mv(request.response), kj::mv(counter));
+      auto promise = releaseSlotOnHeadersReceived
+          ? releaseCounterOnHeaders(kj::mv(request.response), kj::mv(counter))
+          : attachCounter(kj::mv(request.response), kj::mv(counter));
       return { kj::mv(request.body), kj::mv(promise) };
     }
 
@@ -6638,7 +6640,10 @@ public:
                headersCopy = kj::mv(headersCopy),
                expectedBodySize](ConnectionCounter&& counter) mutable {
       auto req = inner.request(method, urlCopy, headersCopy, expectedBodySize);
-      return kj::tuple(kj::mv(req.body), attachCounter(kj::mv(req.response), kj::mv(counter)));
+      auto promise = releaseSlotOnHeadersReceived
+          ? releaseCounterOnHeaders(kj::mv(req.response), kj::mv(counter))
+          : attachCounter(kj::mv(req.response), kj::mv(counter));
+      return kj::tuple(kj::mv(req.body), kj::mv(promise));
     });
     auto split = combined.split();
     pendingRequests.push(kj::mv(paf.fulfiller));
@@ -6652,7 +6657,9 @@ public:
       auto counter = ConnectionCounter(*this);
       auto response = inner.openWebSocket(url, headers);
       fireCountChanged();
-      return attachCounter(kj::mv(response), kj::mv(counter));
+      return releaseSlotOnHeadersReceived
+          ? releaseCounterOnHeaders(kj::mv(response), kj::mv(counter))
+          : attachCounter(kj::mv(response), kj::mv(counter));
     }
 
     auto paf = kj::newPromiseAndFulfiller<ConnectionCounter>();
@@ -6663,7 +6670,9 @@ public:
         .then([this,
                urlCopy = kj::mv(urlCopy),
                headersCopy = kj::mv(headersCopy)](ConnectionCounter&& counter) mutable {
-      return attachCounter(inner.openWebSocket(urlCopy, headersCopy), kj::mv(counter));
+      return releaseSlotOnHeadersReceived
+          ? releaseCounterOnHeaders(inner.openWebSocket(urlCopy, headersCopy), kj::mv(counter))
+          : attachCounter(inner.openWebSocket(urlCopy, headersCopy), kj::mv(counter));
     });
 
     pendingRequests.push(kj::mv(paf.fulfiller));
@@ -6677,7 +6686,9 @@ public:
       auto counter = ConnectionCounter(*this);
       auto response = inner.connect(host, headers, settings);
       fireCountChanged();
-      return attachCounter(kj::mv(response), kj::mv(counter));
+      return releaseSlotOnHeadersReceived
+          ? releaseCounterOnHeaders(kj::mv(response), kj::mv(counter))
+          : attachCounter(kj::mv(response), kj::mv(counter));
     }
 
     auto paf = kj::newPromiseAndFulfiller<ConnectionCounter>();
@@ -6687,7 +6698,9 @@ public:
               (ConnectionCounter&& counter) mutable
                   -> kj::Tuple<kj::Promise<ConnectRequest::Status>,
                                kj::Promise<kj::Own<kj::AsyncIoStream>>> {
-      auto request = attachCounter(inner.connect(host, headers, settings), kj::mv(counter));
+      auto request = releaseSlotOnHeadersReceived
+          ? releaseCounterOnHeaders(inner.connect(host, headers, settings), kj::mv(counter))
+          : attachCounter(inner.connect(host, headers, settings), kj::mv(counter));
       return kj::tuple(kj::mv(request.status), kj::mv(request.connection));
     }).split();
 
@@ -6707,6 +6720,7 @@ private:
   uint maxConcurrentRequests;
   uint concurrentRequests = 0;
   kj::Function<void(uint runningCount, uint pendingCount)> countChangedCallback;
+  bool releaseSlotOnHeadersReceived;
 
   std::queue<kj::Own<kj::PromiseFulfiller<ConnectionCounter>>> pendingRequests;
   // TODO(someday): want maximum cap on queue size?
@@ -6805,15 +6819,55 @@ private:
     request.connection = request.connection.attach(kj::mv(counter));
     return kj::mv(request);
   }
+
+  // The following functions release the concurrency slot when headers are received, rather than
+  // when the response body is fully consumed. Used when releaseSlotOnHeadersReceived is true.
+
+  static kj::Promise<Response> releaseCounterOnHeaders(
+      kj::Promise<Response>&& promise,
+      ConnectionCounter&& counter) {
+    return promise.then([counter = kj::mv(counter)](Response&& response) mutable {
+      // Counter destroyed here when lambda exits, releasing the slot
+      return kj::mv(response);
+    });
+  }
+
+  static kj::Promise<WebSocketResponse> releaseCounterOnHeaders(
+      kj::Promise<WebSocketResponse>&& promise,
+      ConnectionCounter&& counter) {
+    return promise.then([counter = kj::mv(counter)](WebSocketResponse&& response) mutable {
+      // Counter destroyed here when lambda exits, releasing the slot
+      return kj::mv(response);
+    });
+  }
+
+  static ConnectRequest releaseCounterOnHeaders(
+      ConnectRequest&& request,
+      ConnectionCounter&& counter) {
+    // Release the slot when the status promise resolves (headers received)
+    request.status = request.status.then(
+        [counter = kj::mv(counter)](ConnectRequest::Status&& status) mutable {
+      // Counter destroyed here when lambda exits, releasing the slot
+      return kj::mv(status);
+    });
+    return kj::mv(request);
+  }
 };
 
 }
 
 kj::Own<HttpClient> newConcurrencyLimitingHttpClient(
+    HttpClient& inner, ConcurrencyLimitingHttpClientSettings settings) {
+  return kj::heap<ConcurrencyLimitingHttpClient>(inner, kj::mv(settings));
+}
+
+kj::Own<HttpClient> newConcurrencyLimitingHttpClient(
     HttpClient& inner, uint maxConcurrentRequests,
     kj::Function<void(uint runningCount, uint pendingCount)> countChangedCallback) {
-  return kj::heap<ConcurrencyLimitingHttpClient>(inner, maxConcurrentRequests,
-      kj::mv(countChangedCallback));
+  return newConcurrencyLimitingHttpClient(inner, {
+    .maxConcurrentRequests = maxConcurrentRequests,
+    .countChangedCallback = kj::mv(countChangedCallback)
+  });
 }
 
 // =======================================================================================
