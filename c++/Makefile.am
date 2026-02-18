@@ -576,7 +576,6 @@ capnp_test_SOURCES =                                           \
   src/kj/string-tree-test.c++                                  \
   src/kj/table-test.c++                                        \
   src/kj/map-test.c++                                          \
-  src/kj/maybe-test.c++                                        \
   src/kj/encoding-test.c++                                     \
   src/kj/exception-test.c++                                    \
   src/kj/debug-test.c++                                        \
