@@ -6,7 +6,10 @@ set(VERSION 2.0-dev)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-include(CTest)
+if (PROJECT_IS_TOP_LEVEL)
+  include(CTest)
+endif()
+
 include(CheckIncludeFileCXX)
 include(GNUInstallDirs)
 # <print> header was added in C++23
