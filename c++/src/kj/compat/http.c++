@@ -3286,7 +3286,7 @@ private:
         bytes[2] = static_cast<byte>(payloadLen >> 56);
         bytes[3] = static_cast<byte>(payloadLen >> 48);
         bytes[4] = static_cast<byte>(payloadLen >> 40);
-        bytes[5] = static_cast<byte>(payloadLen >> 42);
+        bytes[5] = static_cast<byte>(payloadLen >> 32);
         bytes[6] = static_cast<byte>(payloadLen >> 24);
         bytes[7] = static_cast<byte>(payloadLen >> 16);
         bytes[8] = static_cast<byte>(payloadLen >>  8);
